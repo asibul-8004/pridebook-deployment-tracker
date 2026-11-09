@@ -3,6 +3,7 @@
  * Location: /home/asibul/Pridebook/deployment-tracker/oracle-db.js
  * 
  * Uses Oracle table: SA_DEPLOYMENT_TRACKER
+ * Primary Key: DEPLOYMENT_TRACKER_NO
  * NOTE: The application does NOT execute any DDL / CREATE TABLE statements.
  * Table creation is managed separately via DBA / manual scripts.
  * 
@@ -56,6 +57,29 @@ async function getConnection() {
 }
 
 /**
+ * Fetch next sequence value or calculate MAX(DEPLOYMENT_TRACKER_NO) + 1
+ */
+async function getNextTrackerNo(conn) {
+  try {
+    const resSeq = await conn.execute(`SELECT S_SA_DEPLOYMENT_TRACKER.NEXTVAL AS "next_no" FROM dual`);
+    if (resSeq.rows && resSeq.rows[0]) {
+      return resSeq.rows[0].next_no || resSeq.rows[0].NEXT_NO;
+    }
+  } catch (err) {
+    // Sequence not present, fallback to max + 1
+  }
+  try {
+    const resMax = await conn.execute(`SELECT NVL(MAX(DEPLOYMENT_TRACKER_NO), 0) + 1 AS "next_no" FROM ${TABLE_NAME}`);
+    if (resMax.rows && resMax.rows[0]) {
+      return resMax.rows[0].next_no || resMax.rows[0].NEXT_NO;
+    }
+  } catch (err) {
+    // In case table does not exist yet
+  }
+  return 1;
+}
+
+/**
  * Get all deployments from Oracle table SA_DEPLOYMENT_TRACKER
  */
 async function getAllDeployments(filters = {}) {
@@ -63,7 +87,8 @@ async function getAllDeployments(filters = {}) {
   try {
     let sql = `
       SELECT 
-        ID AS "id",
+        DEPLOYMENT_TRACKER_NO AS "id",
+        DEPLOYMENT_TRACKER_NO AS "deployment_tracker_no",
         CLIENT_NAME AS "client_name",
         STACK AS "stack",
         VERSION AS "version",
@@ -74,7 +99,16 @@ async function getAllDeployments(filters = {}) {
         IS_DEPLOYABLE_TO_CLIENT AS "is_deployable_to_client",
         ISSUE_NOTES AS "issue_notes",
         SYNCED_AT AS "synced_at",
-        UPDATED_AT AS "updated_at"
+        UPDATED_AT AS "updated_at",
+        SS_CREATOR AS "ss_creator",
+        SS_CREATED_ON AS "ss_created_on",
+        SS_MODIFIER AS "ss_modifier",
+        SS_MODIFIED_ON AS "ss_modified_on",
+        COMPANY_NO AS "company_no",
+        SS_OG_NO AS "ss_og_no",
+        SS_UPLOADED_ON AS "ss_uploaded_on",
+        SS_IS_DELETED AS "ss_is_deleted",
+        SS_IS_UPLOADED AS "ss_is_uploaded"
       FROM ${TABLE_NAME}
       WHERE 1=1
     `;
@@ -123,25 +157,38 @@ async function upsertDeployment(record) {
   const stack = String(record.stack).toUpperCase().trim();
   const now = new Date().toISOString();
 
-  const mergeSql = `
-    MERGE INTO ${TABLE_NAME} cd
-    USING (SELECT :client_name AS client_name, :stack AS stack FROM dual) src
-    ON (LOWER(cd.CLIENT_NAME) = LOWER(src.client_name) AND cd.STACK = src.stack)
-    WHEN MATCHED THEN
-      UPDATE SET
-        cd.VERSION = :version,
-        cd.STATUS = :status,
-        cd.DEPLOYED_BY = :deployed_by,
-        cd.LAST_DEPLOYED_AT = :last_deployed_at,
-        cd.RUN_ID = :run_id,
-        cd.SYNCED_AT = :synced_at
-    WHEN NOT MATCHED THEN
-      INSERT (CLIENT_NAME, STACK, VERSION, STATUS, DEPLOYED_BY, LAST_DEPLOYED_AT, RUN_ID, IS_DEPLOYABLE_TO_CLIENT, SYNCED_AT, UPDATED_AT)
-      VALUES (:client_name, :stack, :version, :status, :deployed_by, :last_deployed_at, :run_id, 0, :synced_at, :updated_at)
-  `;
-
   try {
+    const nextNo = await getNextTrackerNo(conn);
+
+    const mergeSql = `
+      MERGE INTO ${TABLE_NAME} cd
+      USING (SELECT :client_name AS client_name, :stack AS stack FROM dual) src
+      ON (LOWER(cd.CLIENT_NAME) = LOWER(src.client_name) AND cd.STACK = src.stack)
+      WHEN MATCHED THEN
+        UPDATE SET
+          cd.VERSION = :version,
+          cd.STATUS = :status,
+          cd.DEPLOYED_BY = :deployed_by,
+          cd.LAST_DEPLOYED_AT = :last_deployed_at,
+          cd.RUN_ID = :run_id,
+          cd.SYNCED_AT = :synced_at,
+          cd.UPDATED_AT = :updated_at,
+          cd.SS_MODIFIED_ON = :synced_at
+      WHEN NOT MATCHED THEN
+        INSERT (
+          DEPLOYMENT_TRACKER_NO, CLIENT_NAME, STACK, VERSION, STATUS, DEPLOYED_BY,
+          LAST_DEPLOYED_AT, RUN_ID, IS_DEPLOYABLE_TO_CLIENT, SYNCED_AT, UPDATED_AT,
+          SS_CREATED_ON, SS_MODIFIED_ON, SS_IS_DELETED, SS_IS_UPLOADED
+        )
+        VALUES (
+          :deployment_tracker_no, :client_name, :stack, :version, :status, :deployed_by,
+          :last_deployed_at, :run_id, 0, :synced_at, :updated_at,
+          :synced_at, :synced_at, 0, 0
+        )
+    `;
+
     await conn.execute(mergeSql, {
+      deployment_tracker_no: nextNo,
       client_name,
       stack,
       version: record.version || 'unknown',
@@ -178,14 +225,16 @@ async function updateDeployableFlag(idOrClient, stackOrValue, maybeValue) {
 
       await conn.execute(
         `UPDATE ${TABLE_NAME} 
-         SET IS_DEPLOYABLE_TO_CLIENT = :flagVal, UPDATED_AT = :now
+         SET IS_DEPLOYABLE_TO_CLIENT = :flagVal, UPDATED_AT = :now, SS_MODIFIED_ON = :now
          WHERE LOWER(CLIENT_NAME) = LOWER(:client_name) AND STACK = :stack`,
         { flagVal, now, client_name, stack }
       );
 
       const res = await conn.execute(
         `SELECT 
-           ID AS "id", CLIENT_NAME AS "client_name", STACK AS "stack", 
+           DEPLOYMENT_TRACKER_NO AS "id", 
+           DEPLOYMENT_TRACKER_NO AS "deployment_tracker_no",
+           CLIENT_NAME AS "client_name", STACK AS "stack", 
            VERSION AS "version", STATUS AS "status", DEPLOYED_BY AS "deployed_by", 
            LAST_DEPLOYED_AT AS "last_deployed_at", RUN_ID AS "run_id", 
            IS_DEPLOYABLE_TO_CLIENT AS "is_deployable_to_client", 
@@ -201,20 +250,22 @@ async function updateDeployableFlag(idOrClient, stackOrValue, maybeValue) {
 
       await conn.execute(
         `UPDATE ${TABLE_NAME} 
-         SET IS_DEPLOYABLE_TO_CLIENT = :flagVal, UPDATED_AT = :now
-         WHERE ID = :id`,
+         SET IS_DEPLOYABLE_TO_CLIENT = :flagVal, UPDATED_AT = :now, SS_MODIFIED_ON = :now
+         WHERE DEPLOYMENT_TRACKER_NO = :id`,
         { flagVal, now, id }
       );
 
       const res = await conn.execute(
         `SELECT 
-           ID AS "id", CLIENT_NAME AS "client_name", STACK AS "stack", 
+           DEPLOYMENT_TRACKER_NO AS "id", 
+           DEPLOYMENT_TRACKER_NO AS "deployment_tracker_no",
+           CLIENT_NAME AS "client_name", STACK AS "stack", 
            VERSION AS "version", STATUS AS "status", DEPLOYED_BY AS "deployed_by", 
            LAST_DEPLOYED_AT AS "last_deployed_at", RUN_ID AS "run_id", 
            IS_DEPLOYABLE_TO_CLIENT AS "is_deployable_to_client", 
            SYNCED_AT AS "synced_at", UPDATED_AT AS "updated_at"
          FROM ${TABLE_NAME} 
-         WHERE ID = :id`,
+         WHERE DEPLOYMENT_TRACKER_NO = :id`,
         { id }
       );
       return res.rows[0];

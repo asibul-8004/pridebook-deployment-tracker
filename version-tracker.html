@@ -1303,7 +1303,6 @@
               <th>Deployed At</th>
               <th>Deployed By</th>
               <th>GitHub Run ID</th>
-              <th>Actions</th>
             </tr>
           </thead>
           <tbody id="historyTableBody">
@@ -1782,11 +1781,8 @@
       const isStage = r.client_name.toLowerCase() === 'stage';
       const isDeployable = r.is_deployable_to_client === 0;
 
-      const runLink = r.run_id 
-        ? `<a href="https://github.com/${r.stack === 'B' ? 'pride-erp-local/pride-erp-backend' : config.githubRepo}/actions/runs/${r.run_id}" target="_blank" rel="noopener noreferrer" style="color:var(--brand-primary); text-decoration:none; display:inline-flex; align-items:center; gap:4px;">
-             #${r.run_id}
-             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
-           </a>`
+      const runDisplay = r.run_id 
+        ? `<span style="font-family: monospace; font-size: 0.85rem; color: var(--text-secondary);">#${escapeHtml(r.run_id)}</span>`
         : '<span style="color:var(--text-muted)">-</span>';
 
       return `
@@ -1835,7 +1831,7 @@
             ${formatDateTime(r.last_deployed_at)}
             <small style="color:var(--text-muted); font-size:0.75rem; margin-left:4px;">${formatRelativeTime(r.last_deployed_at)}</small>
           </td>
-          <td>${runLink}</td>
+          <td>${runDisplay}</td>
           <td>
             <button class="btn btn-primary" style="padding: 4px 10px; font-size: 0.78rem;" onclick="viewClientHistory('${escapeHtml(r.client_name)}')">
               History
@@ -1852,11 +1848,8 @@
       const isStage = r.client_name.toLowerCase() === 'stage';
       const isDeployable = r.is_deployable_to_client === 0;
 
-      const runLink = r.run_id 
-        ? `<a href="https://github.com/${r.stack === 'B' ? 'pride-erp-local/pride-erp-backend' : config.githubRepo}/actions/runs/${r.run_id}" target="_blank" rel="noopener noreferrer">
-             #${r.run_id}
-             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
-           </a>`
+      const runDisplay = r.run_id 
+        ? `<span style="font-family: monospace; font-size: 0.85rem; color: var(--text-secondary);">#${escapeHtml(r.run_id)}</span>`
         : '<span style="color:var(--text-muted)">-</span>';
 
       return `
@@ -1921,8 +1914,8 @@
                 </span>
               </div>
               <div class="meta-item">
-                <span class="meta-label">GitHub Run</span>
-                <span class="meta-value">${runLink}</span>
+                <span class="meta-label">GitHub Run ID</span>
+                <span class="meta-value">${runDisplay}</span>
               </div>
             </div>
           </div>
@@ -2133,7 +2126,7 @@
             emptyText.innerText = `Target box ${heroActiveClient.innerText} has not deployed any historical releases yet.`;
           }
         } else {
-          historyTableBody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding: 32px; color:var(--text-muted)">No matching records found for "${escapeHtml(config.historySearchTerm)}"</td></tr>`;
+          historyTableBody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding: 32px; color:var(--text-muted)">No matching records found for "${escapeHtml(config.historySearchTerm)}"</td></tr>`;
         }
         return;
       }
@@ -2142,16 +2135,9 @@
 
       historyTableBody.innerHTML = filtered.map((item, idx) => {
         const initials = getInitials(item.clientId);
-        const runLink = item.run_id 
-          ? `<a href="https://github.com/${config.githubRepo}/actions/runs/${item.run_id}" target="_blank" rel="noopener noreferrer" style="color:var(--brand-primary); text-decoration:none; display:inline-flex; align-items:center; gap:4px;">
-               #${item.run_id}
-               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
-             </a>`
+        const runDisplay = item.run_id 
+          ? `<span style="font-family: monospace; font-size: 0.85rem; color: var(--text-secondary);">#${escapeHtml(item.run_id)}</span>`
           : '<span style="color:var(--text-muted)">-</span>';
-
-        const releaseLink = item.version && item.version.startsWith('v')
-          ? `<a href="https://github.com/${config.githubRepo}/releases/tag/${item.version}" target="_blank" rel="noopener noreferrer" style="color:var(--brand-primary); text-decoration:none;">Release Notes &rarr;</a>`
-          : '-';
 
         return `
           <tr>
@@ -2178,8 +2164,7 @@
               <small style="color:var(--text-muted); display:block; font-size: 0.75rem;">${formatRelativeTime(item.last_deployed_at)}</small>
             </td>
             <td><strong>${escapeHtml(item.deployed_by || '-')}</strong></td>
-            <td>${runLink}</td>
-            <td>${releaseLink}</td>
+            <td>${runDisplay}</td>
           </tr>
         `;
       }).join('');

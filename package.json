@@ -19,5 +19,8 @@
     "dashboard"
   ],
   "author": "Pridebook DevOps",
-  "license": "ISC"
+  "license": "ISC",
+  "dependencies": {
+    "oracledb": "^26.0.0"
+  }
 }

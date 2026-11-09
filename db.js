@@ -2,13 +2,13 @@
  * Pridebook Version Tracker - Database & GitHub Sync Layer
  * Location: /home/asibul/Pridebook/deployment-tracker/db.js
  * 
- * Uses Node.js native SQLite (node:sqlite) - zero external npm dependencies required!
- * Manages the client_deployments table with:
- * - stack ('F' for Frontend, 'B' for Backend)
- * - client_name ('stage', 'shinshin', 'karupannya', 'ananta-uat', 'ananta-live', etc.)
- * - version, status, deployed_by, last_deployed_at, run_id
- * - is_deployable_to_client (0 = deployable, 1 = has an issue / not deployable)
- * - synced_at, updated_at
+ * Supports:
+ * - Oracle Database (Thin Mode - Zero External Client Binaries)
+ * - Native SQLite (fallback / local standalone)
+ * 
+ * Security:
+ * - Oracle IP, port, service name, user, and password are read from .env.
+ * - Zero credentials hardcoded or committed to git.
  */
 
 const fs = require('fs');
@@ -18,20 +18,34 @@ const { DatabaseSync } = require('node:sqlite');
 const rootDir = __dirname;
 const DB_PATH = process.env.DB_PATH || path.join(rootDir, 'deployments.db');
 
-let dbInstance = null;
+let sqliteInstance = null;
+let oracleDb = null;
 
-function getDb() {
-  if (!dbInstance) {
-    dbInstance = new DatabaseSync(DB_PATH);
-    initSchema(dbInstance);
-  }
-  return dbInstance;
+function isOracleConfigured() {
+  const dbType = (process.env.DB_TYPE || '').toLowerCase();
+  return dbType === 'oracle' && Boolean(process.env.ORACLE_HOST);
 }
 
-function initSchema(db) {
-  // Create table with is_deployable_to_client column:
-  // 0 = Deployable (Default: all good / ready to deploy)
-  // 1 = Has an issue / not deployable
+function getOracleModule() {
+  if (!oracleDb && isOracleConfigured()) {
+    try {
+      oracleDb = require('./oracle-db');
+    } catch (err) {
+      console.warn('[Oracle Driver Warn]:', err.message);
+    }
+  }
+  return oracleDb;
+}
+
+function getSqliteDb() {
+  if (!sqliteInstance) {
+    sqliteInstance = new DatabaseSync(DB_PATH);
+    initSqliteSchema(sqliteInstance);
+  }
+  return sqliteInstance;
+}
+
+function initSqliteSchema(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS client_deployments (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -56,10 +70,20 @@ function initSchema(db) {
 }
 
 /**
- * Get all deployments from DB, sorted by client_name asc, stack asc
+ * Get all deployments from active DB (Oracle or SQLite)
  */
-function getAllDeployments(filters = {}) {
-  const db = getDb();
+async function getAllDeployments(filters = {}) {
+  const oracle = getOracleModule();
+  if (oracle) {
+    try {
+      return await oracle.getAllDeployments(filters);
+    } catch (err) {
+      console.warn('[Oracle Fetch Warn]: Falling back to SQLite:', err.message);
+    }
+  }
+
+  // SQLite fallback
+  const db = getSqliteDb();
   let sql = `SELECT * FROM client_deployments WHERE 1=1`;
   const params = [];
 
@@ -90,12 +114,21 @@ function getAllDeployments(filters = {}) {
 /**
  * Update the is_deployable_to_client flag (0 = deployable, 1 = has issue)
  */
-function updateDeployableFlag(idOrClient, stackOrValue, maybeValue) {
-  const db = getDb();
+async function updateDeployableFlag(idOrClient, stackOrValue, maybeValue) {
+  const oracle = getOracleModule();
+  if (oracle) {
+    try {
+      return await oracle.updateDeployableFlag(idOrClient, stackOrValue, maybeValue);
+    } catch (err) {
+      console.warn('[Oracle Update Warn]: Falling back to SQLite:', err.message);
+    }
+  }
+
+  // SQLite fallback
+  const db = getSqliteDb();
   const now = new Date().toISOString();
 
   if (maybeValue !== undefined) {
-    // Called with: updateDeployableFlag(client_name, stack, flagValue)
     const client_name = String(idOrClient).toLowerCase().trim();
     const stack = String(stackOrValue).toUpperCase().trim();
     const flagValue = parseInt(maybeValue, 10) === 1 ? 1 : 0;
@@ -113,7 +146,6 @@ function updateDeployableFlag(idOrClient, stackOrValue, maybeValue) {
     `);
     return selectStmt.get(client_name, stack);
   } else {
-    // Called with: updateDeployableFlag(id, flagValue)
     const id = parseInt(idOrClient, 10);
     const flagValue = parseInt(stackOrValue, 10) === 1 ? 1 : 0;
 
@@ -130,10 +162,20 @@ function updateDeployableFlag(idOrClient, stackOrValue, maybeValue) {
 }
 
 /**
- * Upsert deployment from GitHub sync without overriding user's is_deployable_to_client setting
+ * Upsert deployment from GitHub sync
  */
-function upsertDeployment(record) {
-  const db = getDb();
+async function upsertDeployment(record) {
+  const oracle = getOracleModule();
+  if (oracle) {
+    try {
+      return await oracle.upsertDeployment(record);
+    } catch (err) {
+      console.warn('[Oracle Upsert Warn]: Falling back to SQLite:', err.message);
+    }
+  }
+
+  // SQLite fallback
+  const db = getSqliteDb();
   const client_name = String(record.client_name).toLowerCase().trim();
   const stack = String(record.stack).toUpperCase().trim();
   const now = new Date().toISOString();
@@ -174,7 +216,6 @@ async function fetchFrontendDeployments(token) {
   const branch = process.env.GITHUB_BRANCH || 'main';
   const records = [];
 
-  // 1. Try reading deployments.json from GitHub
   try {
     const url = `https://api.github.com/repos/${repo}/contents/deployments.json?ref=${branch}`;
     const headers = {
@@ -211,7 +252,7 @@ async function fetchFrontendDeployments(token) {
     console.warn(`[Sync] Failed to fetch frontend deployments.json from GitHub:`, err.message);
   }
 
-  // Fallback to local deployments.json if GitHub returned nothing
+  // Fallback to local deployments.json
   if (records.length === 0) {
     const localJsonPath = path.join(rootDir, 'deployments.json');
     if (fs.existsSync(localJsonPath)) {
@@ -233,7 +274,6 @@ async function fetchFrontendDeployments(token) {
     }
   }
 
-  // Ensure default client boxes exist for frontend
   const standardClients = ['stage', 'shinshin', 'karupannya', 'ananta-uat', 'ananta-live'];
   for (const client of standardClients) {
     if (!records.some(r => r.client_name === client)) {
@@ -258,7 +298,6 @@ async function fetchFrontendDeployments(token) {
 async function fetchBackendDeployments(token) {
   const repo = process.env.GITHUB_BACKEND_REPO || 'pride-erp-local/pride-erp-backend';
   const branch = process.env.GITHUB_BRANCH || 'main';
-  const records = [];
   const standardClients = ['stage', 'shinshin', 'karupannya', 'ananta-uat', 'ananta-live'];
   const clientLatestMap = new Map();
 
@@ -268,7 +307,6 @@ async function fetchBackendDeployments(token) {
   };
   if (token) headers['Authorization'] = `token ${token.trim()}`;
 
-  // 1. Try reading deployments.json if backend repo adds it in future
   try {
     const url = `https://api.github.com/repos/${repo}/contents/deployments.json?ref=${branch}`;
     const res = await fetch(url, { headers });
@@ -293,7 +331,6 @@ async function fetchBackendDeployments(token) {
     }
   } catch (e) {}
 
-  // 2. Query GitHub Actions workflow runs for backend "Release Deploy (API)"
   if (token) {
     try {
       const runsUrl = `https://api.github.com/repos/${repo}/actions/runs?event=workflow_dispatch&per_page=12`;
@@ -302,7 +339,6 @@ async function fetchBackendDeployments(token) {
         const runsData = await res.json();
         const runs = runsData.workflow_runs || [];
 
-        // Fetch jobs in parallel
         await Promise.all(runs.map(async (run) => {
           try {
             const jobsRes = await fetch(run.jobs_url, { headers });
@@ -337,7 +373,6 @@ async function fetchBackendDeployments(token) {
     }
   }
 
-  // Ensure standard clients exist for backend
   for (const client of standardClients) {
     if (!clientLatestMap.has(client)) {
       clientLatestMap.set(client, {
@@ -364,17 +399,21 @@ async function syncDatabaseFromGitHub(token) {
   const allRecords = [...frontendRecords, ...backendRecords];
 
   for (const rec of allRecords) {
-    upsertDeployment(rec);
+    await upsertDeployment(rec);
   }
 
-  return getAllDeployments();
+  return await getAllDeployments();
+}
+
+function getActiveDbType() {
+  return isOracleConfigured() ? 'Oracle (19c)' : 'SQLite';
 }
 
 module.exports = {
-  getDb,
   getAllDeployments,
   updateDeployableFlag,
   upsertDeployment,
   syncDatabaseFromGitHub,
+  getActiveDbType,
   DB_PATH
 };

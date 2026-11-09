@@ -160,6 +160,7 @@ const server = http.createServer(async (req, res) => {
       githubRepo: GITHUB_REPO,
       githubBranch: GITHUB_BRANCH,
       hasServerToken: Boolean(GITHUB_TOKEN && GITHUB_TOKEN.length > 5),
+      dbType: db.getActiveDbType(),
       dbPath: db.DB_PATH
     }, null, 2));
     return;
@@ -171,12 +172,12 @@ const server = http.createServer(async (req, res) => {
     const stackFilter = parsedUrl.searchParams.get('stack'); // 'F' or 'B'
     const clientFilter = parsedUrl.searchParams.get('client');
 
-    let rows = db.getAllDeployments({ stack: stackFilter, client_name: clientFilter });
+    let rows = await db.getAllDeployments({ stack: stackFilter, client_name: clientFilter });
 
     if (shouldSync || rows.length === 0) {
       try {
         await db.syncDatabaseFromGitHub(GITHUB_TOKEN);
-        rows = db.getAllDeployments({ stack: stackFilter, client_name: clientFilter });
+        rows = await db.getAllDeployments({ stack: stackFilter, client_name: clientFilter });
       } catch (err) {
         console.warn('[DB Sync Warn]:', err.message);
       }
@@ -188,6 +189,7 @@ const server = http.createServer(async (req, res) => {
     });
     res.end(JSON.stringify({
       success: true,
+      db_type: db.getActiveDbType(),
       count: rows.length,
       deployable_count: rows.filter(r => r.is_deployable_to_client === 0).length,
       issue_count: rows.filter(r => r.is_deployable_to_client === 1).length,
@@ -203,7 +205,7 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
         success: true,
-        message: 'Synchronized with GitHub repositories successfully',
+        message: `Synchronized with GitHub into ${db.getActiveDbType()} successfully`,
         count: syncedRows.length,
         data: syncedRows
       }, null, 2));
@@ -218,7 +220,7 @@ const server = http.createServer(async (req, res) => {
   if ((pathname === '/api/deployments/toggle-deployable' || pathname === '/api/deployable') && req.method === 'POST') {
     let body = '';
     req.on('data', chunk => { body += chunk; });
-    req.on('end', () => {
+    req.on('end', async () => {
       try {
         const payload = JSON.parse(body || '{}');
         const { id, client_name, client, stack, is_deployable_to_client, is_deployable } = payload;
@@ -228,9 +230,9 @@ const server = http.createServer(async (req, res) => {
 
         let record = null;
         if (id) {
-          record = db.updateDeployableFlag(id, flagVal);
+          record = await db.updateDeployableFlag(id, flagVal);
         } else if (targetClient && stack) {
-          record = db.updateDeployableFlag(targetClient, stack, flagVal);
+          record = await db.updateDeployableFlag(targetClient, stack, flagVal);
         } else {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'id or (client_name and stack) required' }));
@@ -279,7 +281,7 @@ const server = http.createServer(async (req, res) => {
     const isDbFormat = parsedUrl.searchParams.get('format') === 'db';
 
     if (isDbFormat) {
-      const rows = db.getAllDeployments();
+      const rows = await db.getAllDeployments();
       res.writeHead(200, {
         'Content-Type': 'application/json',
         'Cache-Control': 'no-cache, no-store, must-revalidate'
@@ -292,7 +294,7 @@ const server = http.createServer(async (req, res) => {
     
     // Enrich with database deployments list and is_deployable flags
     try {
-      const dbRows = db.getAllDeployments();
+      const dbRows = await db.getAllDeployments();
       if (typeof payload === 'object' && !Array.isArray(payload)) {
         payload._db_deployments = dbRows;
         for (const row of dbRows) {
@@ -410,6 +412,7 @@ server.listen(PORT, () => {
   console.log(`=======================================================`);
   console.log(`  Pridebook Version Tracker App`);
   console.log(`  Mode       : ${SOURCE_MODE.toUpperCase()}`);
+  console.log(`  Database   : ${db.getActiveDbType()}`);
   console.log(`  Dashboard  : http://localhost:${PORT}`);
   console.log(`  Config API : http://localhost:${PORT}/api/config`);
   console.log(`  DB API     : http://localhost:${PORT}/api/db/deployments`);
@@ -418,6 +421,6 @@ server.listen(PORT, () => {
 
   // Background sync from GitHub into DB table on server start
   db.syncDatabaseFromGitHub(GITHUB_TOKEN)
-    .then(rows => console.log(`[DB] Startup sync completed: ${rows.length} records in SQLite DB.`))
+    .then(rows => console.log(`[DB] Startup sync completed: ${rows.length} records in ${db.getActiveDbType()}.`))
     .catch(err => console.warn(`[DB] Startup sync warn: ${err.message}`));
 });

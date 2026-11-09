@@ -64,8 +64,8 @@ Examples:
 }
 
 function displayTable(rows) {
-  console.log(`\n SQLite Database: ${db.DB_PATH}`);
-  console.log(` Table: client_deployments | Total Records: ${rows.length}\n`);
+  console.log(`\n Database: ${db.getActiveDbType()}`);
+  console.log(` Table: CLIENT_DEPLOYMENTS | Total Records: ${rows.length}\n`);
 
   const formatted = rows.map(r => ({
     'Client Box': r.client_name.toUpperCase(),
@@ -112,7 +112,7 @@ async function main() {
       process.exit(1);
     }
 
-    const updated = db.updateDeployableFlag(client, stack.toUpperCase(), flagVal);
+    const updated = await db.updateDeployableFlag(client, stack.toUpperCase(), flagVal);
     if (!updated) {
       console.error(`Client ${client} [${stack.toUpperCase()}] not found in database.`);
       process.exit(1);
@@ -126,14 +126,14 @@ async function main() {
 
   // Handle --list only (no sync)
   if (args.includes('--list')) {
-    const rows = db.getAllDeployments();
+    const rows = await db.getAllDeployments();
     displayTable(rows);
     process.exit(0);
   }
 
   // Default: Full Sync from GitHub
   const token = process.env.GITHUB_TOKEN || '';
-  console.log('🔄 Syncing deployments from GitHub (Frontend + Backend)...');
+  console.log(`🔄 Syncing deployments from GitHub into ${db.getActiveDbType()}...`);
   const startTime = Date.now();
 
   try {
@@ -141,10 +141,13 @@ async function main() {
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
     console.log(` GitHub sync completed in ${duration}s.`);
     displayTable(rows);
+    process.exit(0);
   } catch (err) {
     console.error(' Sync failed:', err.message);
     console.log('Displaying current database records:');
-    displayTable(db.getAllDeployments());
+    const existing = await db.getAllDeployments();
+    displayTable(existing);
+    process.exit(1);
   }
 }
 

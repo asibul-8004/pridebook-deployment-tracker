@@ -543,58 +543,106 @@ async function fetchFrontendRawData(token) {
   };
   if (effectiveToken) headers['Authorization'] = `token ${effectiveToken.trim()}`;
 
-  try {
-    const url = `https://api.github.com/repos/${repo}/contents/deployments.json?ref=${branch}`;
-    const res = await fetch(url, { headers });
-    if (res.ok) {
-      const result = await res.json();
-      let jsonContent = {};
-      if (result.content && result.encoding === 'base64') {
-        jsonContent = JSON.parse(Buffer.from(result.content, 'base64').toString('utf8'));
-      } else if (typeof result === 'object') {
-        jsonContent = result;
+  // 1. Primary: Fetch directly from release-deploy.yml workflow runs (same as backend)
+  if (effectiveToken) {
+    try {
+      let runs = [];
+      const workflowUrl = `https://api.github.com/repos/${repo}/actions/workflows/release-deploy.yml/runs?per_page=40`;
+      const res = await fetch(workflowUrl, { headers });
+      if (res.ok) {
+        const data = await res.json();
+        runs = data.workflow_runs || [];
+      } else {
+        const fallbackUrl = `https://api.github.com/repos/${repo}/actions/runs?per_page=40`;
+        const fallbackRes = await fetch(fallbackUrl, { headers });
+        if (fallbackRes.ok) {
+          const data = await fallbackRes.json();
+          runs = (data.workflow_runs || []).filter(r => r.name && r.name.includes('Release Deploy'));
+        }
       }
 
-      for (const [key, val] of Object.entries(jsonContent)) {
-        if (!val) continue;
-        const client = key.toLowerCase().trim();
-        if (!eventsByClient[client]) eventsByClient[client] = [];
-
-        // Historical runs
-        if (val.history && Array.isArray(val.history)) {
-          for (const h of val.history) {
-            if (h.version) {
+      await Promise.all(runs.map(async (run) => {
+        try {
+          const jobsRes = await fetch(run.jobs_url, { headers });
+          if (!jobsRes.ok) return;
+          const jobsData = await jobsRes.json();
+          for (const job of jobsData.jobs || []) {
+            const match = job.name.match(/(?:Deploy|Validate release)\s+(v[0-9.]+)\s+(?:to|for)\s+([a-zA-Z0-9_-]+)/i);
+            if (match && job.name.startsWith('Deploy')) {
+              const client = match[2].toLowerCase().trim();
+              if (!eventsByClient[client]) eventsByClient[client] = [];
               eventsByClient[client].push({
                 stack: 'F',
-                version: h.version,
-                timestamp: h.last_deployed_at || null,
-                deployed_by: h.deployed_by || 'system',
-                status: h.status || 'success',
-                run_id: h.run_id ? String(h.run_id) : null
+                version: match[1],
+                timestamp: job.completed_at || run.created_at,
+                deployed_by: run.actor?.login || 'system',
+                status: job.conclusion === 'success' ? 'success' : (job.conclusion || 'pending'),
+                run_id: String(run.id)
               });
             }
           }
-        }
-
-        // Current run
-        const current = val.current ? val.current : val;
-        if (current.version) {
-          eventsByClient[client].push({
-            stack: 'F',
-            version: current.version,
-            timestamp: current.last_deployed_at || null,
-            deployed_by: current.deployed_by || 'system',
-            status: current.status || 'success',
-            run_id: current.run_id ? String(current.run_id) : null
-          });
-        }
-      }
+        } catch (e) {}
+      }));
+    } catch (err) {
+      console.warn(`[Sync] Could not inspect frontend workflow runs:`, err.message);
     }
-  } catch (err) {
-    console.warn(`[Sync] Failed to fetch frontend deployments.json from GitHub:`, err.message);
   }
 
-  // Fallback to local deployments.json if needed
+  // 2. Fallback to deployments.json if workflow runs returned nothing
+  if (Object.keys(eventsByClient).length === 0) {
+    try {
+      const url = `https://api.github.com/repos/${repo}/contents/deployments.json?ref=${branch}`;
+      const res = await fetch(url, { headers });
+      if (res.ok) {
+        const result = await res.json();
+        let jsonContent = {};
+        if (result.content && result.encoding === 'base64') {
+          jsonContent = JSON.parse(Buffer.from(result.content, 'base64').toString('utf8'));
+        } else if (typeof result === 'object') {
+          jsonContent = result;
+        }
+
+        for (const [key, val] of Object.entries(jsonContent)) {
+          if (!val) continue;
+          const client = key.toLowerCase().trim();
+          if (!eventsByClient[client]) eventsByClient[client] = [];
+
+          // Historical runs
+          if (val.history && Array.isArray(val.history)) {
+            for (const h of val.history) {
+              if (h.version) {
+                eventsByClient[client].push({
+                  stack: 'F',
+                  version: h.version,
+                  timestamp: h.last_deployed_at || null,
+                  deployed_by: h.deployed_by || 'system',
+                  status: h.status || 'success',
+                  run_id: h.run_id ? String(h.run_id) : null
+                });
+              }
+            }
+          }
+
+          // Current run
+          const current = val.current ? val.current : val;
+          if (current.version) {
+            eventsByClient[client].push({
+              stack: 'F',
+              version: current.version,
+              timestamp: current.last_deployed_at || null,
+              deployed_by: current.deployed_by || 'system',
+              status: current.status || 'success',
+              run_id: current.run_id ? String(current.run_id) : null
+            });
+          }
+        }
+      }
+    } catch (err) {
+      console.warn(`[Sync] Failed to fetch frontend deployments.json from GitHub:`, err.message);
+    }
+  }
+
+  // 3. Fallback to local deployments.json if still empty
   const localJsonPath = path.join(rootDir, 'deployments.json');
   if (Object.keys(eventsByClient).length === 0 && fs.existsSync(localJsonPath)) {
     try {

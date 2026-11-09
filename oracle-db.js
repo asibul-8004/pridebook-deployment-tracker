@@ -62,16 +62,22 @@ const DTL_TABLE_NAME = process.env.ORACLE_DTL_TABLE_NAME || 'SA_DEPLOYMENT_TRACK
 let pool = null;
 
 function getConnectString() {
-  const host = process.env.ORACLE_HOST || '127.0.0.1';
-  const port = process.env.ORACLE_PORT || '1521';
-  const serviceName = process.env.ORACLE_SERVICE_NAME || 'pridedev19c';
+  const host = process.env.ORACLE_HOST;
+  const port = process.env.ORACLE_PORT;
+  const serviceName = process.env.ORACLE_SERVICE_NAME;
+  if (!host || !port || !serviceName) {
+    throw new Error('Oracle configuration missing in .env (ORACLE_HOST, ORACLE_PORT, ORACLE_SERVICE_NAME required)');
+  }
   return `${host}:${port}/${serviceName}`;
 }
 
 async function getPool() {
   if (!pool) {
-    const user = process.env.ORACLE_USER || 'bms';
-    const password = process.env.ORACLE_PASSWORD || 'bms';
+    const user = process.env.ORACLE_USER;
+    const password = process.env.ORACLE_PASSWORD;
+    if (!user || !password) {
+      throw new Error('Oracle credentials missing in .env (ORACLE_USER, ORACLE_PASSWORD required)');
+    }
     const connectString = getConnectString();
 
     pool = await oracledb.createPool({

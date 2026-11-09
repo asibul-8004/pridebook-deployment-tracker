@@ -44,8 +44,8 @@ function loadEnv() {
 loadEnv();
 
 const PORT = parseInt(process.env.PORT, 10) || parseInt(process.argv[2], 10) || 3000;
-const SOURCE_MODE = process.env.SOURCE_MODE || 'github';
-const GITHUB_REPO = process.env.GITHUB_REPO || 'pride-erp-local/pride-erp-frontend';
+const SOURCE_MODE = process.env.SOURCE_MODE;
+const GITHUB_REPO = process.env.GITHUB_REPO;
 const GITHUB_BRANCH = process.env.GITHUB_BRANCH || 'main';
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN || '';
 

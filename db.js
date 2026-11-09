@@ -514,7 +514,7 @@ async function upsertDeployment(record) {
  * Fetch raw deployment history from GitHub Frontend repository
  */
 async function fetchFrontendRawData(token) {
-  const repo = process.env.GITHUB_FRONTEND_REPO || process.env.GITHUB_REPO || 'pride-erp-local/pride-erp-frontend';
+  const repo = process.env.GITHUB_FRONTEND_REPO || process.env.GITHUB_REPO;
   const branch = process.env.GITHUB_BRANCH || 'main';
   const eventsByClient = {};
 
@@ -603,7 +603,7 @@ async function fetchFrontendRawData(token) {
  * Fetch raw deployment history from GitHub Backend repository
  */
 async function fetchBackendRawData(token) {
-  const repo = process.env.GITHUB_BACKEND_REPO || 'pride-erp-local/pride-erp-backend';
+  const repo = process.env.GITHUB_BACKEND_REPO;
   const eventsByClient = {};
 
   const headers = {

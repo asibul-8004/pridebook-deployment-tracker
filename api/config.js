@@ -15,8 +15,8 @@ module.exports = async (req, res) => {
   const token = process.env.GITHUB_TOKEN || '';
   return res.status(200).json({
     port: parseInt(process.env.PORT, 10) || 3000,
-    sourceMode: process.env.SOURCE_MODE,
-    githubRepo: process.env.GITHUB_REPO,
+    sourceMode: process.env.SOURCE_MODE || 'github',
+    githubRepo: process.env.GITHUB_REPO || 'pride-erp-local/pride-erp-frontend',
     githubBranch: process.env.GITHUB_BRANCH || 'main',
     hasServerToken: Boolean(token && token.length > 5),
     dbType: db.getActiveDbType(),

@@ -135,7 +135,8 @@ async function main() {
   const startTime = Date.now();
 
   try {
-    const rows = await db.syncDatabaseFromGitHub(token);
+    const res = await db.syncDatabaseFromGitHub(token);
+    const rows = Array.isArray(res) ? res : (res && res.data ? res.data : []);
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
     console.log(` GitHub sync completed in ${duration}s.`);
     displayTable(rows);

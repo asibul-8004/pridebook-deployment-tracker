@@ -44,8 +44,8 @@ function loadEnv() {
 loadEnv();
 
 const PORT = parseInt(process.env.PORT, 10) || parseInt(process.argv[2], 10) || 3000;
-const SOURCE_MODE = process.env.SOURCE_MODE;
-const GITHUB_REPO = process.env.GITHUB_REPO;
+const SOURCE_MODE = process.env.SOURCE_MODE || 'github';
+const GITHUB_REPO = process.env.GITHUB_REPO || 'pride-erp-local/pride-erp-frontend';
 const GITHUB_BRANCH = process.env.GITHUB_BRANCH || 'main';
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN || '';
 
@@ -480,7 +480,10 @@ if (require.main === module || !process.env.VERCEL) {
 
     // Background sync from GitHub into DB table on server start
     db.syncDatabaseFromGitHub(GITHUB_TOKEN)
-      .then(rows => console.log(`[DB] Startup sync completed: ${rows.length} records in ${db.getActiveDbType()}.`))
+      .then(res => {
+        const count = Array.isArray(res) ? res.length : (res && res.data ? res.data.length : 0);
+        console.log(`[DB] Startup sync completed: ${count} records in ${db.getActiveDbType()}.`);
+      })
       .catch(err => console.warn(`[DB] Startup sync warn: ${err.message}`));
   });
 }

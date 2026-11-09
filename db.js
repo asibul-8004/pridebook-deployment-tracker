@@ -57,6 +57,7 @@ function resolveDbPath() {
 let activeDbPath = resolveDbPath();
 let sqliteInstance = null;
 let oracleDb = null;
+let isOracleFailed = false;
 let mergedHistoryCache = [];
 const inMemoryStore = new Map();
 let lastSyncCheckTime = 0;
@@ -106,6 +107,14 @@ function getSqliteDb() {
 
 function initSqliteSchema(db) {
   try {
+    // Migration: ensure is_deployable_to_client column exists on pre-existing SQLite databases
+    try {
+      db.exec(`ALTER TABLE SA_DEPLOYMENT_TRACKER ADD COLUMN is_deployable_to_client INTEGER NOT NULL DEFAULT 0;`);
+    } catch (e) {}
+    try {
+      db.exec(`ALTER TABLE SA_DEPLOYMENT_TRACKER_DTL ADD COLUMN is_deployable_to_client INTEGER NOT NULL DEFAULT 0;`);
+    } catch (e) {}
+
     // Master Table: SA_DEPLOYMENT_TRACKER
     db.exec(`
       CREATE TABLE IF NOT EXISTS SA_DEPLOYMENT_TRACKER (
@@ -166,8 +175,11 @@ async function getAllDeployments(filters = {}) {
   const oracle = getOracleModule();
   if (oracle) {
     try {
-      return await oracle.getAllDeployments(filters);
+      const rows = await oracle.getAllDeployments(filters);
+      isOracleFailed = false;
+      return rows;
     } catch (err) {
+      isOracleFailed = true;
       console.warn('[Oracle Fetch Warn]: Falling back to SQLite:', err.message);
     }
   }
@@ -514,15 +526,16 @@ async function upsertDeployment(record) {
  * Fetch raw deployment history from GitHub Frontend repository
  */
 async function fetchFrontendRawData(token) {
-  const repo = process.env.GITHUB_FRONTEND_REPO || process.env.GITHUB_REPO;
+  const repo = process.env.GITHUB_FRONTEND_REPO || process.env.GITHUB_REPO || 'pride-erp-local/pride-erp-frontend';
   const branch = process.env.GITHUB_BRANCH || 'main';
+  const effectiveToken = token || process.env.GITHUB_TOKEN || '';
   const eventsByClient = {};
 
   const headers = {
     'User-Agent': 'Pridebook-DB-Sync',
     'Accept': 'application/vnd.github.v3+json'
   };
-  if (token) headers['Authorization'] = `token ${token.trim()}`;
+  if (effectiveToken) headers['Authorization'] = `token ${effectiveToken.trim()}`;
 
   try {
     const url = `https://api.github.com/repos/${repo}/contents/deployments.json?ref=${branch}`;
@@ -603,48 +616,57 @@ async function fetchFrontendRawData(token) {
  * Fetch raw deployment history from GitHub Backend repository
  */
 async function fetchBackendRawData(token) {
-  const repo = process.env.GITHUB_BACKEND_REPO;
+  const repo = process.env.GITHUB_BACKEND_REPO || (process.env.GITHUB_REPO ? process.env.GITHUB_REPO.replace(/-frontend$/, '-backend') : '') || 'pride-erp-local/pride-erp-backend';
+  const effectiveToken = token || process.env.GITHUB_TOKEN || '';
   const eventsByClient = {};
 
   const headers = {
     'User-Agent': 'Pridebook-DB-Sync',
     'Accept': 'application/vnd.github.v3+json'
   };
-  if (token) headers['Authorization'] = `token ${token.trim()}`;
+  if (effectiveToken) headers['Authorization'] = `token ${effectiveToken.trim()}`;
 
-  if (token) {
+  if (effectiveToken) {
     try {
-      const runsUrl = `https://api.github.com/repos/${repo}/actions/runs?per_page=35`;
-      const res = await fetch(runsUrl, { headers });
+      let runs = [];
+      // 1. Target the specific Release Deploy workflow for backend deployments
+      const workflowUrl = `https://api.github.com/repos/${repo}/actions/workflows/release-deploy.yml/runs?per_page=40`;
+      const res = await fetch(workflowUrl, { headers });
       if (res.ok) {
-        const runsData = await res.json();
-        const runs = runsData.workflow_runs || [];
-
-        // Check release deploy workflow runs
-        await Promise.all(runs.map(async (run) => {
-          if (!run.name || !run.name.includes('Release Deploy')) return;
-          try {
-            const jobsRes = await fetch(run.jobs_url, { headers });
-            if (!jobsRes.ok) return;
-            const jobsData = await jobsRes.json();
-            for (const job of jobsData.jobs || []) {
-              const match = job.name.match(/(?:Deploy|Validate release)\s+(v[0-9.]+)\s+(?:to|for)\s+([a-zA-Z0-9_-]+)/i);
-              if (match && job.name.startsWith('Deploy')) {
-                const client = match[2].toLowerCase().trim();
-                if (!eventsByClient[client]) eventsByClient[client] = [];
-                eventsByClient[client].push({
-                  stack: 'B',
-                  version: match[1],
-                  timestamp: job.completed_at || run.created_at,
-                  deployed_by: run.actor?.login || 'system',
-                  status: job.conclusion === 'success' ? 'success' : (job.conclusion || 'pending'),
-                  run_id: String(run.id)
-                });
-              }
-            }
-          } catch (e) {}
-        }));
+        const data = await res.json();
+        runs = data.workflow_runs || [];
+      } else {
+        // Fallback to general workflow runs
+        const fallbackUrl = `https://api.github.com/repos/${repo}/actions/runs?per_page=40`;
+        const fallbackRes = await fetch(fallbackUrl, { headers });
+        if (fallbackRes.ok) {
+          const data = await fallbackRes.json();
+          runs = (data.workflow_runs || []).filter(r => r.name && r.name.includes('Release Deploy'));
+        }
       }
+
+      await Promise.all(runs.map(async (run) => {
+        try {
+          const jobsRes = await fetch(run.jobs_url, { headers });
+          if (!jobsRes.ok) return;
+          const jobsData = await jobsRes.json();
+          for (const job of jobsData.jobs || []) {
+            const match = job.name.match(/(?:Deploy|Validate release)\s+(v[0-9.]+)\s+(?:to|for)\s+([a-zA-Z0-9_-]+)/i);
+            if (match && job.name.startsWith('Deploy')) {
+              const client = match[2].toLowerCase().trim();
+              if (!eventsByClient[client]) eventsByClient[client] = [];
+              eventsByClient[client].push({
+                stack: 'B',
+                version: match[1],
+                timestamp: job.completed_at || run.created_at,
+                deployed_by: run.actor?.login || 'system',
+                status: job.conclusion === 'success' ? 'success' : (job.conclusion || 'pending'),
+                run_id: String(run.id)
+              });
+            }
+          }
+        } catch (e) {}
+      }));
     } catch (err) {
       console.warn(`[Sync] Could not inspect backend workflow runs:`, err.message);
     }
@@ -878,7 +900,10 @@ async function syncDatabaseFromGitHub(token) {
 }
 
 function getActiveDbType() {
-  return isOracleConfigured() ? 'Oracle (19c)' : 'SQLite';
+  if (isOracleConfigured()) {
+    return isOracleFailed ? 'SQLite (Failover)' : 'Oracle (19c)';
+  }
+  return 'SQLite';
 }
 
 module.exports = {

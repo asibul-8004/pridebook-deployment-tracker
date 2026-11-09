@@ -26,7 +26,8 @@
       position: fixed;
       inset: 0;
       z-index: 99999;
-      background: #0b0f19;
+      background: rgba(11, 15, 25, 0.95);
+      backdrop-filter: blur(8px);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -85,22 +86,153 @@
       background: transparent;
       border-bottom-color: #3b82f6;
     }
+
+    /* Cards matching project palette */
     .card {
-      background-color: #111827;
-      border: 1px solid #1e293b;
+      background-color: #0f172a !important;
+      border: 1px solid #1e293b !important;
       border-radius: 14px;
     }
+    .card-header {
+      background: transparent !important;
+      border-bottom: 1px solid #1e293b !important;
+    }
+    .card-footer {
+      background: transparent !important;
+      border-top: 1px solid #1e293b !important;
+    }
+
     .form-control, .form-select {
-      background-color: #0f172a;
-      border-color: #1f2937;
-      color: #f9fafb;
+      background-color: #090d16 !important;
+      border-color: #1e293b !important;
+      color: #f9fafb !important;
     }
     .form-control:focus, .form-select:focus {
-      background-color: #0f172a;
-      border-color: #3b82f6;
-      box-shadow: 0 0 0 0.25rem rgba(59, 130, 246, 0.2);
-      color: #f9fafb;
+      background-color: #090d16 !important;
+      border-color: #3b82f6 !important;
+      box-shadow: 0 0 0 0.25rem rgba(59, 130, 246, 0.2) !important;
+      color: #f9fafb !important;
     }
+    .input-group-text {
+      background-color: #090d16 !important;
+      border-color: #1e293b !important;
+      color: #94a3b8 !important;
+    }
+
+    /* Card state border accents */
+    .card.border-primary {
+      border-color: #3b82f6 !important;
+    }
+    .card.border-success {
+      border-color: #10b981 !important;
+    }
+    .card.border-danger {
+      border-color: #ef4444 !important;
+    }
+
+    /* Awaiting Deployment Trigger Step Box (Matches Project) */
+    .step-box {
+      background-color: #090d16 !important;
+      border: 1px solid #1e293b !important;
+      border-radius: 10px;
+      color: #94a3b8;
+    }
+
+    /* Table Container and Styling (Matches Project) */
+    .table-responsive {
+      background: #0f172a !important;
+      border: 1px solid #1e293b !important;
+      border-radius: 12px;
+      overflow-x: auto;
+    }
+    .project-table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #0f172a;
+      color: #f8fafc;
+      margin-bottom: 0;
+      font-size: 0.88rem;
+    }
+    .project-table th {
+      background: #090d16 !important;
+      padding: 14px 18px;
+      color: #94a3b8 !important;
+      font-weight: 600;
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      border-bottom: 1px solid #1e293b !important;
+      border-top: none !important;
+      white-space: nowrap;
+    }
+    .project-table td {
+      padding: 14px 18px;
+      border-bottom: 1px solid #1e293b !important;
+      color: #f8fafc !important;
+      background: transparent !important;
+      vertical-align: middle;
+    }
+    .project-table tbody tr:hover td {
+      background-color: #1e293b !important;
+    }
+    .project-table tr:last-child td {
+      border-bottom: none !important;
+    }
+
+    /* Status Badges & Client Tag matching project */
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 0.73rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      white-space: nowrap;
+    }
+    .status-badge.success {
+      background: rgba(16, 185, 129, 0.12);
+      color: #10b981;
+      border: 1px solid rgba(16, 185, 129, 0.35);
+    }
+    .status-badge.pending {
+      background: rgba(245, 158, 11, 0.12);
+      color: #f59e0b;
+      border: 1px solid rgba(245, 158, 11, 0.35);
+    }
+    .status-badge.failed {
+      background: rgba(239, 68, 68, 0.12);
+      color: #ef4444;
+      border: 1px solid rgba(239, 68, 68, 0.35);
+    }
+    .status-badge.cancelled {
+      background: rgba(148, 163, 184, 0.12);
+      color: #94a3b8;
+      border: 1px solid rgba(148, 163, 184, 0.35);
+    }
+    .badge-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background-color: currentColor;
+    }
+
+    .client-box-tag {
+      display: inline-block;
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: #94a3b8;
+      background: #090d16;
+      padding: 3px 8px;
+      border-radius: 6px;
+      border: 1px solid #1e293b;
+      text-transform: uppercase;
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      letter-spacing: 0.03em;
+    }
+
     .stack-avatar {
       width: 28px;
       height: 28px;
@@ -160,7 +292,7 @@
         <div class="mb-3 text-start">
           <label class="form-label text-secondary small fw-bold">Username</label>
           <div class="input-group">
-            <span class="input-group-text bg-dark-subtle border-secondary-subtle text-secondary">
+            <span class="input-group-text text-secondary">
               <i class="bi bi-person-fill"></i>
             </span>
             <input
@@ -178,7 +310,7 @@
         <div class="mb-4 text-start">
           <label class="form-label text-secondary small fw-bold">Password</label>
           <div class="input-group">
-            <span class="input-group-text bg-dark-subtle border-secondary-subtle text-secondary">
+            <span class="input-group-text text-secondary">
               <i class="bi bi-key-fill"></i>
             </span>
             <input
@@ -234,6 +366,11 @@
     let currentAuthToken = sessionStorage.getItem('pride_token') || '';
     let currentAuthUser = sessionStorage.getItem('pride_deploy_user') || 'pridebook';
 
+    // 1-Hour Session Expiration State
+    let sessionTimeoutTimer = null;
+    let sessionCheckHeartbeat = null;
+    let sessionExpiresAt = parseInt(sessionStorage.getItem('pride_expires_at') || '0', 10);
+
     // Deployment tracking state
     let activePollTimer = null;
     let timerInterval = null;
@@ -256,29 +393,203 @@
     });
 
     // ------------------------------------------------------------------------
+    // 1-Hour Session Management
+    // ------------------------------------------------------------------------
+    function startOneHourSessionTimer(expiresInSeconds = 3600) {
+      if (sessionTimeoutTimer) clearTimeout(sessionTimeoutTimer);
+      if (sessionCheckHeartbeat) clearInterval(sessionCheckHeartbeat);
+
+      sessionExpiresAt = Date.now() + (expiresInSeconds * 1000);
+      sessionStorage.setItem('pride_expires_at', sessionExpiresAt.toString());
+
+      sessionTimeoutTimer = setTimeout(() => {
+        onSessionExpired();
+      }, expiresInSeconds * 1000);
+
+      // Check every 5 seconds for tab sleep or clock jump
+      sessionCheckHeartbeat = setInterval(() => {
+        if (isSessionAuthenticated && Date.now() >= sessionExpiresAt) {
+          clearInterval(sessionCheckHeartbeat);
+          onSessionExpired();
+        }
+      }, 5000);
+    }
+
+    function onSessionExpired() {
+      if (!isSessionAuthenticated) return;
+      isSessionAuthenticated = false;
+      if (sessionTimeoutTimer) clearTimeout(sessionTimeoutTimer);
+      if (sessionCheckHeartbeat) clearInterval(sessionCheckHeartbeat);
+
+      // Clear token
+      sessionStorage.removeItem('pride_token');
+      sessionStorage.removeItem('pride_expires_at');
+      currentAuthToken = '';
+
+      showReauthModal();
+    }
+
+    function showReauthModal() {
+      let modalEl = document.getElementById('reauthGate');
+      if (!modalEl) {
+        modalEl = document.createElement('div');
+        modalEl.id = 'reauthGate';
+        modalEl.className = 'auth-gate-overlay';
+        document.body.appendChild(modalEl);
+      }
+
+      modalEl.innerHTML = `
+        <div class="auth-gate-card">
+          <div class="brand-logo mb-3 mx-auto">PB</div>
+          <h4 class="fw-bold text-light mb-2">
+            <i class="bi bi-shield-lock-fill text-primary me-2"></i>Pride Login
+          </h4>
+          <p class="text-warning small mb-3" style="font-size: 0.85rem;">
+            <i class="bi bi-clock-history me-1"></i> Your 1-hour session has expired. Please enter password to continue.
+          </p>
+
+          <div class="alert alert-danger d-none py-2 small mb-3 text-start" id="reauthAlert"></div>
+
+          <form id="reauthForm" onsubmit="event.preventDefault(); submitReauth();">
+            <div class="mb-3 text-start">
+              <label class="form-label text-secondary small fw-bold">Username</label>
+              <div class="input-group">
+                <span class="input-group-text text-secondary">
+                  <i class="bi bi-person-fill"></i>
+                </span>
+                <input
+                  type="text"
+                  class="form-control"
+                  id="reauthUser"
+                  value="${escapeHtml(currentAuthUser || 'pridebook')}"
+                  readonly
+                  style="background-color: #090d16 !important; cursor: not-allowed;"
+                />
+              </div>
+            </div>
+
+            <div class="mb-4 text-start">
+              <label class="form-label text-secondary small fw-bold">Password</label>
+              <div class="input-group">
+                <span class="input-group-text text-secondary">
+                  <i class="bi bi-key-fill"></i>
+                </span>
+                <input
+                  type="password"
+                  class="form-control"
+                  id="reauthPass"
+                  placeholder="Enter password"
+                  autocomplete="current-password"
+                  required
+                  autofocus
+                />
+              </div>
+            </div>
+
+            <button type="submit" class="btn btn-primary w-100 fw-bold py-2 shadow-sm" id="reauthSubmitBtn">
+              Login
+            </button>
+
+            <div class="mt-3">
+              <a href="/" class="text-secondary small text-decoration-none">
+                <i class="bi bi-arrow-left me-1"></i> Back to Dashboard
+              </a>
+            </div>
+          </form>
+        </div>
+      `;
+
+      modalEl.style.display = 'flex';
+      modalEl.style.opacity = '1';
+
+      setTimeout(() => {
+        const passInp = document.getElementById('reauthPass');
+        if (passInp) passInp.focus();
+      }, 50);
+
+      startTamperDefenseForElement(modalEl);
+    }
+
+    async function submitReauth() {
+      const user = document.getElementById('reauthUser').value.trim() || currentAuthUser || 'pridebook';
+      const pass = document.getElementById('reauthPass').value.trim();
+      const alertEl = document.getElementById('reauthAlert');
+      const submitBtn = document.getElementById('reauthSubmitBtn');
+
+      if (!pass) {
+        alertEl.textContent = 'Please enter your password.';
+        alertEl.classList.remove('d-none');
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Login...';
+
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: user, password: pass })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || 'Invalid credentials');
+        }
+
+        // Re-authenticated!
+        isSessionAuthenticated = true;
+        stopTamperDefense();
+
+        currentAuthUser = data.username || user;
+        currentAuthToken = data.token;
+        sessionStorage.setItem('pride_token', data.token);
+        sessionStorage.setItem('pride_deploy_user', currentAuthUser);
+
+        const modalEl = document.getElementById('reauthGate');
+        if (modalEl) {
+          modalEl.style.transition = 'opacity 0.2s ease';
+          modalEl.style.opacity = '0';
+          setTimeout(() => modalEl.remove(), 200);
+        }
+
+        // Restart 1-hour session timer
+        startOneHourSessionTimer(data.expiresIn || 3600);
+        showToast('Session renewed for 1 hour. You can continue deployments!');
+      } catch (err) {
+        alertEl.textContent = err.message;
+        alertEl.classList.remove('d-none');
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = 'Login';
+      }
+    }
+
+    // ------------------------------------------------------------------------
     // Tamper Defense System (Blocks Dev Console / Element inspection tampering)
     // ------------------------------------------------------------------------
     function startTamperDefense() {
       const gate = document.getElementById('authGate');
-      if (!gate) return;
+      if (gate) startTamperDefenseForElement(gate);
+    }
 
-      // 1. MutationObserver: Detects if popup is removed, hidden, or style modified
-      tamperObserver = new MutationObserver((mutations) => {
+    function startTamperDefenseForElement(gateEl) {
+      stopTamperDefense();
+
+      tamperObserver = new MutationObserver(() => {
         if (isSessionAuthenticated) return;
-        const currentGate = document.getElementById('authGate');
-        if (!currentGate) {
+        if (!document.contains(gateEl)) {
           triggerTamperLockdown('Login popup removed from DOM');
           return;
         }
 
-        const comp = window.getComputedStyle(currentGate);
+        const comp = window.getComputedStyle(gateEl);
         if (
           comp.display === 'none' ||
           comp.visibility === 'hidden' ||
           parseFloat(comp.opacity) < 0.1 ||
-          currentGate.hidden ||
-          currentGate.offsetWidth === 0 ||
-          currentGate.offsetHeight === 0
+          gateEl.hidden ||
+          gateEl.offsetWidth === 0 ||
+          gateEl.offsetHeight === 0
         ) {
           triggerTamperLockdown('Login popup hidden via DevTools');
           return;
@@ -286,26 +597,24 @@
       });
 
       tamperObserver.observe(document.body, { childList: true, subtree: true, attributes: true });
-      tamperObserver.observe(gate, { attributes: true, attributeFilter: ['style', 'class', 'hidden'] });
+      tamperObserver.observe(gateEl, { attributes: true, attributeFilter: ['style', 'class', 'hidden'] });
 
-      // 2. Continuous Watchdog Timer (every 250ms)
       tamperCheckInterval = setInterval(() => {
         if (isSessionAuthenticated) {
           clearInterval(tamperCheckInterval);
           return;
         }
-        const currentGate = document.getElementById('authGate');
-        if (!currentGate) {
+        if (!document.contains(gateEl)) {
           triggerTamperLockdown('Login popup node removed');
           return;
         }
-        const comp = window.getComputedStyle(currentGate);
+        const comp = window.getComputedStyle(gateEl);
         if (
           comp.display === 'none' ||
           comp.visibility === 'hidden' ||
           parseFloat(comp.opacity) < 0.1 ||
-          currentGate.offsetWidth === 0 ||
-          currentGate.offsetHeight === 0
+          gateEl.offsetWidth === 0 ||
+          gateEl.offsetHeight === 0
         ) {
           triggerTamperLockdown('Login popup hidden');
           return;
@@ -328,7 +637,6 @@
       if (isSessionAuthenticated) return;
       stopTamperDefense();
 
-      // Ensure release content is blanked and immediately redirect
       const container = document.getElementById('releaseAppContainer');
       if (container) container.innerHTML = '';
       document.body.innerHTML = `
@@ -353,17 +661,14 @@
           const res = await fetch('/api/auth/verify', {
             headers: { 'Authorization': `Bearer ${currentAuthToken}` }
           });
-          if (res.ok) {
-            const data = await res.json();
-            if (data.authenticated) {
-              onAuthSuccess(data.username || currentAuthUser, currentAuthToken);
-              return;
-            }
+          const data = await res.json();
+          if (res.ok && data.authenticated) {
+            onAuthSuccess(data.username || currentAuthUser, currentAuthToken, data.expiresIn || 3600);
+            return;
           }
         } catch (_) {}
       }
 
-      // Not authenticated -> Start tamper defense
       startTamperDefense();
     }
 
@@ -393,7 +698,7 @@
           throw new Error(data.error || 'Invalid credentials');
         }
 
-        onAuthSuccess(data.username || user, data.token);
+        onAuthSuccess(data.username || user, data.token, data.expiresIn || 3600);
       } catch (err) {
         alertEl.textContent = err.message;
         alertEl.classList.remove('d-none');
@@ -403,7 +708,7 @@
       }
     }
 
-    function onAuthSuccess(user, token) {
+    function onAuthSuccess(user, token, expiresIn = 3600) {
       isSessionAuthenticated = true;
       stopTamperDefense();
 
@@ -411,6 +716,9 @@
       currentAuthToken = token;
       sessionStorage.setItem('pride_token', token);
       sessionStorage.setItem('pride_deploy_user', user);
+
+      // Start 1-hour session timer
+      startOneHourSessionTimer(expiresIn);
 
       // Fade out gate and mount release DOM
       const gate = document.getElementById('authGate');
@@ -426,6 +734,7 @@
     function logout() {
       sessionStorage.removeItem('pride_token');
       sessionStorage.removeItem('pride_deploy_user');
+      sessionStorage.removeItem('pride_expires_at');
       document.cookie = 'pride_auth=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;';
       const container = document.getElementById('releaseAppContainer');
       if (container) container.innerHTML = '';
@@ -498,7 +807,7 @@
 
           <!-- Release Deployment Control Card -->
           <div class="card mb-4 shadow-sm">
-            <div class="card-header bg-transparent py-3 border-secondary-subtle d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <div class="card-header py-3 d-flex align-items-center justify-content-between flex-wrap gap-2">
               <div>
                 <h5 class="card-title mb-1 fw-bold text-light">
                   <i class="bi bi-rocket-takeoff me-2 text-primary"></i> Release Deployment
@@ -519,7 +828,7 @@
                 <div class="row g-3 align-items-end">
                   <!-- Client Box Select -->
                   <div class="col-md-3">
-                    <label class="form-label text-secondary small fw-bold text-uppercase">Client Name</label>
+                    <label class="form-label text-secondary small fw-bold text-uppercase mb-1">Client Name</label>
                     <select class="form-select" id="targetClient" required onchange="onInputsChanged()">
                       <option value="stage">stage</option>
                       <option value="shinshin">shinshin</option>
@@ -532,19 +841,19 @@
 
                   <!-- Frontend Version Input -->
                   <div class="col-md-3">
-                    <label class="form-label text-secondary small fw-bold text-uppercase d-flex justify-content-between">
+                    <label class="form-label text-secondary small fw-bold text-uppercase d-flex justify-content-between align-items-center mb-1">
                       <span>Frontend Version</span>
-                      <span class="text-muted" style="font-size: 0.72rem;">Optional if Backend set</span>
+                      <span class="text-secondary fw-normal" style="font-size: 0.72rem; text-transform: none;">(Optional)</span>
                     </label>
                     <div class="input-group">
-                      <span class="input-group-text bg-dark-subtle border-secondary-subtle text-primary fw-bold">F</span>
+                      <span class="input-group-text text-primary fw-bold">F</span>
                       <input
                         type="text"
                         class="form-control"
                         id="frontendVersion"
                         placeholder="e.g. v1.42.0"
                         list="frontendTagsList"
-                        pattern="^v[0-9]+\\.[0-9]+\\.[0-9]+$"
+                        pattern="^v[0-9]+\.[0-9]+\.[0-9]+$"
                         title="Format: vX.Y.Z (e.g. v1.42.0)"
                         oninput="onInputsChanged()"
                       />
@@ -554,19 +863,19 @@
 
                   <!-- Backend Version Input -->
                   <div class="col-md-3">
-                    <label class="form-label text-secondary small fw-bold text-uppercase d-flex justify-content-between">
+                    <label class="form-label text-secondary small fw-bold text-uppercase d-flex justify-content-between align-items-center mb-1">
                       <span>Backend Version</span>
-                      <span class="text-muted" style="font-size: 0.72rem;">Optional if Frontend set</span>
+                      <span class="text-secondary fw-normal" style="font-size: 0.72rem; text-transform: none;">(Optional)</span>
                     </label>
                     <div class="input-group">
-                      <span class="input-group-text bg-dark-subtle border-secondary-subtle text-info fw-bold">B</span>
+                      <span class="input-group-text text-info fw-bold">B</span>
                       <input
                         type="text"
                         class="form-control"
                         id="backendVersion"
                         placeholder="e.g. v2.10.2"
                         list="backendTagsList"
-                        pattern="^v[0-9]+\\.[0-9]+\\.[0-9]+$"
+                        pattern="^v[0-9]+\.[0-9]+\.[0-9]+$"
                         title="Format: vX.Y.Z (e.g. v2.10.2)"
                         oninput="onInputsChanged()"
                       />
@@ -591,7 +900,7 @@
             <!-- Card 1: Frontend Deployment Card -->
             <div class="col-md-6" id="frontendCol">
               <div class="card h-100 shadow-sm border-secondary-subtle" id="frontendCard">
-                <div class="card-header bg-transparent py-3 border-secondary-subtle d-flex align-items-center justify-content-between">
+                <div class="card-header py-3 d-flex align-items-center justify-content-between">
                   <div class="d-flex align-items-center gap-2">
                     <span class="stack-avatar f">F</span>
                     <span class="fw-bold text-light">Frontend Deployment</span>
@@ -605,14 +914,14 @@
                     <span>Version: <strong class="text-primary font-monospace fs-6" id="frontendVersionTxt">-</strong></span>
                   </div>
 
-                  <!-- Current Step Alert Box -->
-                  <div class="p-3 rounded-3 bg-dark-subtle border border-secondary-subtle mb-3 d-flex align-items-center gap-2">
+                  <!-- Current Step Alert Box (Styled to match project) -->
+                  <div class="p-3 rounded-3 step-box mb-3 d-flex align-items-center gap-2">
                     <div class="spinner-border spinner-border-sm text-primary d-none" id="frontendSpinner" role="status"></div>
-                    <span class="small text-light" id="frontendJobTxt">Awaiting deployment trigger...</span>
+                    <span class="small text-secondary" id="frontendJobTxt">Awaiting deployment trigger...</span>
                   </div>
 
                   <!-- Animated Progress Bar -->
-                  <div class="progress mb-3" style="height: 6px;">
+                  <div class="progress mb-3" style="height: 6px; background-color: #090d16;">
                     <div class="progress-bar progress-bar-striped progress-bar-animated bg-primary" id="frontendProgress" style="width: 0%"></div>
                   </div>
 
@@ -627,7 +936,7 @@
                   </div>
                 </div>
 
-                <div class="card-footer bg-transparent py-2 border-secondary-subtle d-flex justify-content-end" id="frontendFooter">
+                <div class="card-footer py-2 d-flex justify-content-end" id="frontendFooter">
                   <button class="btn btn-sm btn-outline-danger d-none" id="frontendCancelBtn" onclick="cancelRun('frontend')">
                     <i class="bi bi-x-circle me-1"></i> Cancel Run
                   </button>
@@ -638,7 +947,7 @@
             <!-- Card 2: Backend (API) Deployment Card -->
             <div class="col-md-6" id="backendCol">
               <div class="card h-100 shadow-sm border-secondary-subtle" id="backendCard">
-                <div class="card-header bg-transparent py-3 border-secondary-subtle d-flex align-items-center justify-content-between">
+                <div class="card-header py-3 d-flex align-items-center justify-content-between">
                   <div class="d-flex align-items-center gap-2">
                     <span class="stack-avatar b">B</span>
                     <span class="fw-bold text-light">Backend (API) Deployment</span>
@@ -652,14 +961,14 @@
                     <span>Version: <strong class="text-info font-monospace fs-6" id="backendVersionTxt">-</strong></span>
                   </div>
 
-                  <!-- Current Step Alert Box -->
-                  <div class="p-3 rounded-3 bg-dark-subtle border border-secondary-subtle mb-3 d-flex align-items-center gap-2">
+                  <!-- Current Step Alert Box (Styled to match project) -->
+                  <div class="p-3 rounded-3 step-box mb-3 d-flex align-items-center gap-2">
                     <div class="spinner-border spinner-border-sm text-info d-none" id="backendSpinner" role="status"></div>
-                    <span class="small text-light" id="backendJobTxt">Awaiting deployment trigger...</span>
+                    <span class="small text-secondary" id="backendJobTxt">Awaiting deployment trigger...</span>
                   </div>
 
                   <!-- Animated Progress Bar -->
-                  <div class="progress mb-3" style="height: 6px;">
+                  <div class="progress mb-3" style="height: 6px; background-color: #090d16;">
                     <div class="progress-bar progress-bar-striped progress-bar-animated bg-info" id="backendProgress" style="width: 0%"></div>
                   </div>
 
@@ -674,7 +983,7 @@
                   </div>
                 </div>
 
-                <div class="card-footer bg-transparent py-2 border-secondary-subtle d-flex justify-content-end" id="backendFooter">
+                <div class="card-footer py-2 d-flex justify-content-end" id="backendFooter">
                   <button class="btn btn-sm btn-outline-danger d-none" id="backendCancelBtn" onclick="cancelRun('backend')">
                     <i class="bi bi-x-circle me-1"></i> Cancel Run
                   </button>
@@ -683,16 +992,16 @@
             </div>
           </div>
 
-          <!-- Recent GitHub Release Deploy Runs Table -->
-          <div class="card shadow-sm">
-            <div class="card-header bg-transparent py-3 border-secondary-subtle d-flex align-items-center justify-content-between">
+          <!-- Recent GitHub Release Deploy Runs Table (Matching Project Style) -->
+          <div class="card shadow-sm mb-4">
+            <div class="card-header py-3 d-flex align-items-center justify-content-between">
               <h6 class="card-title mb-0 fw-bold text-light">
                 <i class="bi bi-journal-code me-2 text-primary"></i> Recent GitHub Release Deploy Runs
               </h6>
             </div>
             <div class="table-responsive">
-              <table class="table table-hover align-middle mb-0" style="font-size: 0.88rem;">
-                <thead class="table-dark text-secondary text-uppercase" style="font-size: 0.78rem;">
+              <table class="project-table align-middle">
+                <thead>
                   <tr>
                     <th scope="col" style="padding-left: 1.25rem;">Stack</th>
                     <th scope="col">Client Box</th>
@@ -829,6 +1138,12 @@
     // Deploy Trigger Execution (With Loading State & Selective Stacks)
     // ------------------------------------------------------------------------
     async function onDeployClick() {
+      // Check if session has expired (1 hour check)
+      if (Date.now() >= sessionExpiresAt) {
+        onSessionExpired();
+        return;
+      }
+
       const clientEl = document.getElementById('targetClient');
       const fTagEl = document.getElementById('frontendVersion');
       const bTagEl = document.getElementById('backendVersion');
@@ -904,6 +1219,11 @@
         });
 
         const data = await res.json();
+        if (res.status === 401 && data.expired) {
+          onSessionExpired();
+          throw new Error('Your 1-hour session has expired. Please re-authenticate.');
+        }
+
         if (!res.ok || !data.success) {
           throw new Error(data.error || 'Failed to dispatch deployment');
         }
@@ -1150,6 +1470,11 @@
     }
 
     async function cancelRun(stack) {
+      if (Date.now() >= sessionExpiresAt) {
+        onSessionExpired();
+        return;
+      }
+
       const runId = currentActiveRunIds[stack];
       if (!runId) {
         showToast(`No active run ID found to cancel for ${stack}`, true);
@@ -1176,6 +1501,11 @@
         });
 
         const data = await res.json();
+        if (res.status === 401 && data.expired) {
+          onSessionExpired();
+          throw new Error('Your 1-hour session has expired. Please re-authenticate.');
+        }
+
         if (!res.ok || !data.success) {
           throw new Error(data.error || 'Failed to cancel run');
         }
@@ -1209,8 +1539,21 @@
           const tr = document.createElement('tr');
           const isSuccess = run.conclusion === 'success';
           const isCancelled = run.conclusion === 'cancelled';
-          const badgeClass = isSuccess ? 'bg-success' : (isCancelled ? 'bg-secondary' : (run.conclusion ? 'bg-danger' : 'bg-warning text-dark'));
-          const statusText = run.conclusion || run.status || 'unknown';
+          const isFailed = run.conclusion === 'failure' || run.conclusion === 'timed_out';
+          const isPending = !run.conclusion && (run.status === 'in_progress' || run.status === 'queued');
+
+          let badgeHtml = '';
+          if (isSuccess) {
+            badgeHtml = `<span class="status-badge success"><span class="badge-dot"></span> SUCCESS</span>`;
+          } else if (isCancelled) {
+            badgeHtml = `<span class="status-badge cancelled"><span class="badge-dot"></span> CANCELLED</span>`;
+          } else if (isFailed) {
+            badgeHtml = `<span class="status-badge failed"><span class="badge-dot"></span> FAILED</span>`;
+          } else if (isPending) {
+            badgeHtml = `<span class="status-badge pending"><span class="badge-dot"></span> ${escapeHtml((run.status || 'in progress').toUpperCase())}</span>`;
+          } else {
+            badgeHtml = `<span class="status-badge cancelled"><span class="badge-dot"></span> ${escapeHtml((run.conclusion || run.status || 'unknown').toUpperCase())}</span>`;
+          }
 
           tr.innerHTML = `
             <td style="padding-left: 1.25rem;">
@@ -1218,7 +1561,7 @@
               <strong>${escapeHtml(run.stack)}</strong>
             </td>
             <td>
-              <span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle rounded-pill text-uppercase px-2 py-1 font-monospace">
+              <span class="client-box-tag">
                 ${escapeHtml(run.client || '-')}
               </span>
             </td>
@@ -1228,9 +1571,7 @@
                 <i class="bi bi-box-arrow-up-right ms-1 small"></i>
               </a>
             </td>
-            <td>
-              <span class="badge ${badgeClass} rounded-pill px-2 py-1 text-uppercase">${escapeHtml(statusText)}</span>
-            </td>
+            <td>${badgeHtml}</td>
             <td class="text-secondary small">${escapeHtml(run.actor || 'system')}</td>
             <td class="text-secondary small" style="padding-right: 1.25rem;">${formatDate(run.created_at)}</td>
           `;

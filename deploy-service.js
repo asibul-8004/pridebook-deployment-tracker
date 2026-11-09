@@ -84,7 +84,7 @@ function generateAuthToken(username) {
 }
 
 /**
- * Verify HMAC signed authentication token (valid 24h)
+ * Verify HMAC signed authentication token (valid 1 hour)
  */
 function verifyAuthToken(token) {
   if (!token) return null;
@@ -95,11 +95,20 @@ function verifyAuthToken(token) {
     if (parts.length !== 3) return null;
     const [user, timeStr, sig] = parts;
     const timestamp = parseInt(timeStr, 10);
-    if (Date.now() - timestamp > 24 * 60 * 60 * 1000) return null;
+    // Valid for exactly 1 hour (3600 seconds)
+    const ONE_HOUR_MS = 60 * 60 * 1000;
+    if (Date.now() - timestamp > ONE_HOUR_MS) {
+      return { valid: false, expired: true, username: user };
+    }
     const expectedSig = crypto.createHmac('sha256', getAuthSecret()).update(`${user}:${timeStr}`).digest('hex');
     const expectedUser = (process.env.AUTH_USERNAME || (process.env.USERNAME && process.env.USERNAME !== process.env.USER ? process.env.USERNAME : null) || 'pridebook').trim();
     if (sig === expectedSig && user === expectedUser) {
-      return { valid: true, username: user };
+      return {
+        valid: true,
+        username: user,
+        timestamp,
+        expiresIn: Math.max(0, Math.floor((ONE_HOUR_MS - (Date.now() - timestamp)) / 1000))
+      };
     }
     return null;
   } catch (_) {
@@ -206,8 +215,16 @@ async function triggerReleaseDeploy({
   let isAuth = false;
   if (username && password && verifyCredentials(username, password)) {
     isAuth = true;
-  } else if (authToken && verifyAuthToken(authToken)) {
-    isAuth = true;
+  } else if (authToken) {
+    const verified = verifyAuthToken(authToken);
+    if (verified && verified.valid) {
+      isAuth = true;
+    } else if (verified && verified.expired) {
+      const err = new Error('Session expired after 1 hour. Please log in again.');
+      err.statusCode = 401;
+      err.expired = true;
+      throw err;
+    }
   }
 
   if (!isAuth) {
@@ -325,8 +342,30 @@ async function triggerReleaseDeploy({
 /**
  * Cancel an active GitHub workflow run
  */
-async function cancelDeployRun({ stack, run_id, token }) {
+async function cancelDeployRun({ stack, run_id, authToken, username, password, token }) {
   if (!run_id) throw new Error('Missing run_id to cancel');
+
+  // Verify auth if token or credentials provided
+  let isAuth = false;
+  if (username && password && verifyCredentials(username, password)) {
+    isAuth = true;
+  } else if (authToken) {
+    const verified = verifyAuthToken(authToken);
+    if (verified && verified.valid) {
+      isAuth = true;
+    } else if (verified && verified.expired) {
+      const err = new Error('Session expired after 1 hour. Please log in again.');
+      err.statusCode = 401;
+      err.expired = true;
+      throw err;
+    }
+  }
+
+  if (!isAuth) {
+    const err = new Error('Invalid or missing authentication credentials');
+    err.statusCode = 401;
+    throw err;
+  }
   const isBackend = stack && stack.toLowerCase().startsWith('b');
   const repo = isBackend
     ? (getEnv('GITHUB_BACKEND_REPO') || (getEnv('GITHUB_REPO') ? getEnv('GITHUB_REPO').replace(/-frontend$/, '-backend') : '') || 'pride-erp-local/pride-erp-backend')

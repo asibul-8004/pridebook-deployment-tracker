@@ -25,11 +25,12 @@ module.exports = async (req, res) => {
     res.setHeader('Content-Type', 'application/json');
     if (isValid) {
       const token = deployService.generateAuthToken(payload.username);
-      res.setHeader('Set-Cookie', `pride_auth=${token}; Path=/; SameSite=Lax; Max-Age=86400`);
+      res.setHeader('Set-Cookie', `pride_auth=${token}; Path=/; SameSite=Lax; Max-Age=3600`);
       return res.status(200).json({
         success: true,
         token,
         username: payload.username,
+        expiresIn: 3600,
         message: 'Authentication successful'
       });
     } else {

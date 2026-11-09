@@ -35,13 +35,16 @@ module.exports = async (req, res) => {
       return res.status(200).json({
         success: true,
         authenticated: true,
-        username: verified.username
+        username: verified.username,
+        expiresIn: verified.expiresIn
       });
     } else {
+      const isExpired = Boolean(verified && verified.expired);
       return res.status(401).json({
         success: false,
         authenticated: false,
-        error: 'Unauthorized or session expired'
+        expired: isExpired,
+        error: isExpired ? 'Session expired after 1 hour. Please log in again.' : 'Unauthorized or invalid token'
       });
     }
   } catch (err) {

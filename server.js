@@ -468,12 +468,13 @@ const server = http.createServer(async (req, res) => {
           const token = deployService.generateAuthToken(payload.username);
           res.writeHead(200, {
             'Content-Type': 'application/json',
-            'Set-Cookie': `pride_auth=${token}; Path=/; SameSite=Lax; Max-Age=86400`
+            'Set-Cookie': `pride_auth=${token}; Path=/; SameSite=Lax; Max-Age=3600`
           });
           res.end(JSON.stringify({
             success: true,
             token,
             username: payload.username,
+            expiresIn: 3600,
             message: 'Authentication successful'
           }));
         } else {
@@ -513,13 +514,24 @@ const server = http.createServer(async (req, res) => {
         'Content-Type': 'application/json',
         'Cache-Control': 'no-cache, no-store, must-revalidate'
       });
-      res.end(JSON.stringify({ success: true, authenticated: true, username: verified.username }));
+      res.end(JSON.stringify({
+        success: true,
+        authenticated: true,
+        username: verified.username,
+        expiresIn: verified.expiresIn
+      }));
     } else {
+      const isExpired = Boolean(verified && verified.expired);
       res.writeHead(401, {
         'Content-Type': 'application/json',
         'Cache-Control': 'no-cache, no-store, must-revalidate'
       });
-      res.end(JSON.stringify({ success: false, authenticated: false, error: 'Unauthorized' }));
+      res.end(JSON.stringify({
+        success: false,
+        authenticated: false,
+        expired: isExpired,
+        error: isExpired ? 'Session expired after 1 hour. Please log in again.' : 'Unauthorized or invalid token'
+      }));
     }
     return;
   }
@@ -554,16 +566,31 @@ const server = http.createServer(async (req, res) => {
     req.on('end', async () => {
       try {
         const payload = JSON.parse(body || '{}');
+        let authToken = payload.authToken || payload.token || '';
+        if (!authToken && req.headers.authorization) {
+          const authH = req.headers.authorization;
+          if (authH.startsWith('Bearer ')) authToken = authH.slice(7).trim();
+          else authToken = authH.trim();
+        }
+        if (!authToken && req.headers.cookie) {
+          const m = req.headers.cookie.match(/pride_auth=([^;]+)/);
+          if (m) authToken = m[1];
+        }
+
         const result = await deployService.cancelDeployRun({
           stack: payload.stack,
           run_id: payload.run_id,
+          authToken,
+          username: payload.username,
+          password: payload.password,
           token: GITHUB_TOKEN
         });
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(result));
       } catch (err) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, error: err.message }));
+        const status = err.statusCode || 400;
+        res.writeHead(status, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: err.message, expired: Boolean(err.expired) }));
       }
     });
     return;
@@ -601,7 +628,7 @@ const server = http.createServer(async (req, res) => {
       } catch (err) {
         const status = err.statusCode || 400;
         res.writeHead(status, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, error: err.message }));
+        res.end(JSON.stringify({ success: false, error: err.message, expired: Boolean(err.expired) }));
       }
     });
     return;

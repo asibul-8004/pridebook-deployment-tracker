@@ -23,18 +23,32 @@ module.exports = async (req, res) => {
 
     const stack = payload.stack;
     const run_id = payload.run_id;
+    let authToken = payload.authToken || payload.token || '';
+    if (!authToken && req.headers.authorization) {
+      const authH = req.headers.authorization;
+      if (authH.startsWith('Bearer ')) authToken = authH.slice(7).trim();
+      else authToken = authH.trim();
+    }
+    if (!authToken && req.headers.cookie) {
+      const m = req.headers.cookie.match(/pride_auth=([^;]+)/);
+      if (m) authToken = m[1];
+    }
     const token = process.env.GITHUB_TOKEN || '';
 
     const result = await deployService.cancelDeployRun({
       stack,
       run_id,
+      authToken,
+      username: payload.username,
+      password: payload.password,
       token
     });
 
     res.setHeader('Content-Type', 'application/json');
     return res.status(200).json(result);
   } catch (err) {
+    const status = err.statusCode || 400;
     res.setHeader('Content-Type', 'application/json');
-    return res.status(400).json({ success: false, error: err.message });
+    return res.status(status).json({ success: false, error: err.message, expired: Boolean(err.expired) });
   }
 };

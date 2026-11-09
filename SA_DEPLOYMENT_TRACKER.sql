@@ -49,31 +49,6 @@ CREATE INDEX IDX_SA_DEPLOY_CLIENT ON SA_DEPLOYMENT_TRACKER (CLIENT_NAME) TABLESP
 CREATE INDEX IDX_SA_DEPLOY_STACK  ON SA_DEPLOYMENT_TRACKER (STACK) TABLESPACE SIT;
 CREATE INDEX IDX_SA_DEPLOY_FLAG   ON SA_DEPLOYMENT_TRACKER (IS_DEPLOYABLE_TO_CLIENT) TABLESPACE SIT;
 
--- Column Documentation Comments
-COMMENT ON TABLE  SA_DEPLOYMENT_TRACKER                         IS 'Tracks frontend and backend deployments across all ERP client boxes';
-COMMENT ON COLUMN SA_DEPLOYMENT_TRACKER.ID                      IS 'Primary key unique auto-increment identifier';
-COMMENT ON COLUMN SA_DEPLOYMENT_TRACKER.CLIENT_NAME             IS 'Client box / tenant name (e.g., stage, shinshin, karupannya, ananta-uat, ananta-live)';
-COMMENT ON COLUMN SA_DEPLOYMENT_TRACKER.STACK                   IS 'Deployment component stack: F for Frontend, B for Backend';
-COMMENT ON COLUMN SA_DEPLOYMENT_TRACKER.VERSION                 IS 'Currently deployed release version tag (e.g., v1.41.0, v2.10.0)';
-COMMENT ON COLUMN SA_DEPLOYMENT_TRACKER.STATUS                  IS 'Deployment health status (e.g., success, pending_first_deploy, failure)';
-COMMENT ON COLUMN SA_DEPLOYMENT_TRACKER.DEPLOYED_BY             IS 'Username or actor who triggered the release deployment';
-COMMENT ON COLUMN SA_DEPLOYMENT_TRACKER.LAST_DEPLOYED_AT        IS 'UTC ISO-8601 timestamp when deployment completed';
-COMMENT ON COLUMN SA_DEPLOYMENT_TRACKER.RUN_ID                  IS 'GitHub Actions workflow run identifier';
-COMMENT ON COLUMN SA_DEPLOYMENT_TRACKER.IS_DEPLOYABLE_TO_CLIENT IS '0 = Deployable (ready / all good), 1 = Has an issue (blocked / not deployable)';
-COMMENT ON COLUMN SA_DEPLOYMENT_TRACKER.ISSUE_NOTES             IS 'Optional description or notes if an issue is reported';
-COMMENT ON COLUMN SA_DEPLOYMENT_TRACKER.SYNCED_AT               IS 'Timestamp when data was synchronized from GitHub';
-COMMENT ON COLUMN SA_DEPLOYMENT_TRACKER.UPDATED_AT              IS 'Timestamp when row or deployable flag was last modified';
-COMMENT ON COLUMN SA_DEPLOYMENT_TRACKER.SS_CREATOR              IS 'User ID who created the record';
-COMMENT ON COLUMN SA_DEPLOYMENT_TRACKER.SS_CREATED_ON           IS 'Creation timestamp';
-COMMENT ON COLUMN SA_DEPLOYMENT_TRACKER.SS_MODIFIER             IS 'User ID who last modified the record';
-COMMENT ON COLUMN SA_DEPLOYMENT_TRACKER.SS_MODIFIED_ON          IS 'Modification timestamp';
-COMMENT ON COLUMN SA_DEPLOYMENT_TRACKER.COMPANY_NO              IS 'PrideSys Company ID';
-COMMENT ON COLUMN SA_DEPLOYMENT_TRACKER.SS_OG_NO                IS 'PrideSys Operating Group ID';
-COMMENT ON COLUMN SA_DEPLOYMENT_TRACKER.SS_UPLOADED_ON          IS 'Timestamp when record was uploaded to remote node';
-COMMENT ON COLUMN SA_DEPLOYMENT_TRACKER.SS_IS_DELETED           IS 'Soft-delete flag: 0 = Active, 1 = Deleted';
-COMMENT ON COLUMN SA_DEPLOYMENT_TRACKER.SS_IS_UPLOADED          IS 'Upload status flag: 0 = Pending, 1 = Uploaded';
-
-
 -- =============================================================================
 -- Option 2: Sequence-Based Table Creation (If your DBA prefers Sequences)
 -- =============================================================================

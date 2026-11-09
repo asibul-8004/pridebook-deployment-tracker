@@ -22,6 +22,35 @@
  */
 
 const oracledb = require('oracledb');
+const fs = require('fs');
+const path = require('path');
+
+// Ensure .env is loaded if running in standalone script or worker
+function loadEnv() {
+  const envPath = path.join(__dirname, '.env');
+  if (fs.existsSync(envPath)) {
+    try {
+      const content = fs.readFileSync(envPath, 'utf8');
+      const lines = content.split('\n');
+      for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line || line.startsWith('#')) continue;
+        const eqIdx = line.indexOf('=');
+        if (eqIdx !== -1) {
+          const key = line.slice(0, eqIdx).trim();
+          let val = line.slice(eqIdx + 1).trim();
+          if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+            val = val.slice(1, -1);
+          }
+          if (process.env[key] === undefined) {
+            process.env[key] = val;
+          }
+        }
+      }
+    } catch (e) {}
+  }
+}
+loadEnv();
 
 // Configure Oracle driver defaults
 oracledb.outFormat = oracledb.OUT_FORMAT_OBJECT;
@@ -273,8 +302,10 @@ async function upsertDeployment(record) {
           frontend_run_id: record.frontend_run_id ? String(record.frontend_run_id) : null,
           backend_run_id: record.backend_run_id ? String(record.backend_run_id) : null,
           synced_at: now
-        }
+        },
+        { autoCommit: true }
       );
+      await conn.commit();
     } else {
       // New client onboarded! Auto-add in main table
       trackerNo = await getNextTrackerNo(conn);
@@ -302,8 +333,10 @@ async function upsertDeployment(record) {
           frontend_run_id: record.frontend_run_id ? String(record.frontend_run_id) : null,
           backend_run_id: record.backend_run_id ? String(record.backend_run_id) : null,
           synced_at: now
-        }
+        },
+        { autoCommit: true }
       );
+      await conn.commit();
       console.log(`[Oracle Onboard] Auto-added new client "${client_name}" into ${TABLE_NAME} (ID: ${trackerNo})`);
     }
 
@@ -368,8 +401,10 @@ async function syncHistoryEvents(historyEvents) {
             fRun: ev.event_stack === 'F' ? String(ev.run_id || '') : null,
             bRun: ev.event_stack === 'B' ? String(ev.run_id || '') : null,
             now
-          }
+          },
+          { autoCommit: true }
         );
+        await conn.commit();
         clientTrackerMap[client] = trackerNo;
         console.log(`[Oracle Onboard] Auto-added client "${client}" to ${TABLE_NAME} for history sync (ID: ${trackerNo})`);
       }
@@ -423,8 +458,10 @@ async function syncHistoryEvents(historyEvents) {
             eventTime,
             isDeployable: isDepVal,
             now
-          }
+          },
+          { autoCommit: true }
         );
+        await conn.commit();
         inserted++;
       }
     }
@@ -457,8 +494,10 @@ async function updateDeployableFlag(idOrClient, flagValue) {
         `UPDATE ${TABLE_NAME} 
          SET IS_DEPLOYABLE_TO_CLIENT = :flagVal, UPDATED_AT = :now, SS_MODIFIED_ON = :now
          WHERE DEPLOYMENT_TRACKER_NO = :id`,
-        { flagVal, now, id }
+        { flagVal, now, id },
+        { autoCommit: true }
       );
+      await conn.commit();
 
       const res = await conn.execute(
         `SELECT 
@@ -487,8 +526,10 @@ async function updateDeployableFlag(idOrClient, flagValue) {
         `UPDATE ${TABLE_NAME} 
          SET IS_DEPLOYABLE_TO_CLIENT = :flagVal, UPDATED_AT = :now, SS_MODIFIED_ON = :now
          WHERE LOWER(CLIENT_NAME) = LOWER(:client_name)`,
-        { flagVal, now, client_name }
+        { flagVal, now, client_name },
+        { autoCommit: true }
       );
+      await conn.commit();
 
       const res = await conn.execute(
         `SELECT 
@@ -537,8 +578,10 @@ async function updateHistoryDeployableFlag(dtlId, flagValue) {
       `UPDATE ${DTL_TABLE_NAME} 
        SET IS_DEPLOYABLE_TO_CLIENT = :flagVal, SS_MODIFIED_ON = :now
        WHERE DEPLOYMENT_TRACKER_DTL_NO = :id`,
-      { flagVal, now, id }
+      { flagVal, now, id },
+      { autoCommit: true }
     );
+    await conn.commit();
 
     const res = await conn.execute(
       `SELECT 

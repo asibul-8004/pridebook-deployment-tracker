@@ -2,6 +2,7 @@
   "stage": {
     "current": {
       "version": "v1.39.1",
+      "backend_version": "unknown",
       "status": "success",
       "last_deployed_at": "2026-11-08T10:28:12Z",
       "deployed_by": "asibul-8004",
@@ -10,18 +11,64 @@
     "previous": null,
     "history": []
   },
-  "shinshin": {
-    "version": "unknown",
-    "status": "pending_first_deploy",
-    "last_deployed_at": null,
-    "deployed_by": null,
-    "run_id": null
+  "ananta-live": {
+    "current": {
+      "version": "unknown",
+      "backend_version": "unknown",
+      "status": "pending_first_deploy",
+      "last_deployed_at": null,
+      "deployed_by": "system",
+      "run_id": null
+    },
+    "previous": null,
+    "history": []
+  },
+  "ananta-uat": {
+    "current": {
+      "version": "unknown",
+      "backend_version": "unknown",
+      "status": "pending_first_deploy",
+      "last_deployed_at": null,
+      "deployed_by": "system",
+      "run_id": null
+    },
+    "previous": null,
+    "history": []
+  },
+  "bengal": {
+    "current": {
+      "version": "unknown",
+      "backend_version": "unknown",
+      "status": "pending_first_deploy",
+      "last_deployed_at": null,
+      "deployed_by": "system",
+      "run_id": null
+    },
+    "previous": null,
+    "history": []
   },
   "karupannya": {
-    "version": "unknown",
-    "status": "pending_first_deploy",
-    "last_deployed_at": null,
-    "deployed_by": null,
-    "run_id": null
+    "current": {
+      "version": "unknown",
+      "backend_version": "unknown",
+      "status": "pending_first_deploy",
+      "last_deployed_at": null,
+      "deployed_by": "system",
+      "run_id": null
+    },
+    "previous": null,
+    "history": []
+  },
+  "shinshin": {
+    "current": {
+      "version": "unknown",
+      "backend_version": "unknown",
+      "status": "pending_first_deploy",
+      "last_deployed_at": null,
+      "deployed_by": "system",
+      "run_id": null
+    },
+    "previous": null,
+    "history": []
   }
 }

@@ -60,6 +60,7 @@ let oracleDb = null;
 let isOracleFailed = false;
 let mergedHistoryCache = [];
 const inMemoryStore = new Map();
+const workflowJobsCache = new Map();
 let lastSyncCheckTime = 0;
 
 function isOracleConfigured() {
@@ -563,10 +564,17 @@ async function fetchFrontendRawData(token) {
 
       await Promise.all(runs.map(async (run) => {
         try {
-          const jobsRes = await fetch(run.jobs_url, { headers });
-          if (!jobsRes.ok) return;
-          const jobsData = await jobsRes.json();
-          for (const job of jobsData.jobs || []) {
+          let jobs = workflowJobsCache.get(run.id);
+          if (!jobs) {
+            const jobsRes = await fetch(run.jobs_url, { headers });
+            if (!jobsRes.ok) return;
+            const jobsData = await jobsRes.json();
+            jobs = jobsData.jobs || [];
+            if (run.status === 'completed') {
+              workflowJobsCache.set(run.id, jobs);
+            }
+          }
+          for (const job of jobs) {
             const match = job.name.match(/(?:Deploy|Validate release)\s+(v[0-9.]+)\s+(?:to|for)\s+([a-zA-Z0-9_-]+)/i);
             if (match && job.name.startsWith('Deploy')) {
               const client = match[2].toLowerCase().trim();
@@ -701,10 +709,17 @@ async function fetchBackendRawData(token) {
 
       await Promise.all(runs.map(async (run) => {
         try {
-          const jobsRes = await fetch(run.jobs_url, { headers });
-          if (!jobsRes.ok) return;
-          const jobsData = await jobsRes.json();
-          for (const job of jobsData.jobs || []) {
+          let jobs = workflowJobsCache.get(run.id);
+          if (!jobs) {
+            const jobsRes = await fetch(run.jobs_url, { headers });
+            if (!jobsRes.ok) return;
+            const jobsData = await jobsRes.json();
+            jobs = jobsData.jobs || [];
+            if (run.status === 'completed') {
+              workflowJobsCache.set(run.id, jobs);
+            }
+          }
+          for (const job of jobs) {
             const match = job.name.match(/(?:Deploy|Validate release)\s+(v[0-9.]+)\s+(?:to|for)\s+([a-zA-Z0-9_-]+)/i);
             if (match && job.name.startsWith('Deploy')) {
               const client = match[2].toLowerCase().trim();
@@ -815,6 +830,20 @@ async function getDeploymentsWithSync(options = {}) {
             run_id: ev.run_id,
             event_time: ev.timestamp
           });
+        }
+
+        // Never regress known database versions to 'unknown' if GitHub returns no events
+        if (curF.version === 'unknown' && dbRow && dbRow.frontend_version && dbRow.frontend_version !== 'unknown') {
+          curF.version = dbRow.frontend_version;
+          curF.deployed_at = dbRow.frontend_deployed_at;
+          curF.deployed_by = dbRow.deployed_by;
+          curF.run_id = dbRow.frontend_run_id;
+        }
+        if (curB.version === 'unknown' && dbRow && dbRow.backend_version && dbRow.backend_version !== 'unknown') {
+          curB.version = dbRow.backend_version;
+          curB.deployed_at = dbRow.backend_deployed_at;
+          curB.deployed_by = dbRow.deployed_by;
+          curB.run_id = dbRow.backend_run_id;
         }
 
         const overallStatus = (curF.status === 'success' || curB.status === 'success')

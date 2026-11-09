@@ -1289,14 +1289,6 @@
           <!-- Dynamically populated buttons -->
         </div>
 
-        <!-- Deployable Filter Buttons for History (0 = Deployable, 1 = Has Issue) -->
-        <div class="filter-group">
-          <span style="font-size:0.75rem; color:var(--text-muted); font-weight:600; text-transform:uppercase;">Deployable:</span>
-          <button class="filter-btn active" data-hist-deployable="all" onclick="setHistoryDeployableFilter('all')">All</button>
-          <button class="filter-btn" data-hist-deployable="0" onclick="setHistoryDeployableFilter('0')">✓ 0 Ready</button>
-          <button class="filter-btn" data-hist-deployable="1" onclick="setHistoryDeployableFilter('1')">⚠ 1 Issue</button>
-        </div>
-
         <div class="search-box">
           <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="11" cy="11" r="8"></circle>
@@ -1318,7 +1310,7 @@
               <th>Status</th>
               <th>Frontend Deploy At</th>
               <th>Backend Deploy At</th>
-              <th>Deployable to Client</th>
+              <th id="thHistDeployable">Deployable to Client</th>
             </tr>
           </thead>
           <tbody id="historyTableBody">
@@ -1355,8 +1347,7 @@
       clientView: 'table', // By default in list/table mode
       clientStatusFilter: 'all',
       clientSearchTerm: '',
-      historySelectedClient: 'all',
-      historyDeployableFilter: 'all', // 'all', '0', '1'
+      historySelectedClient: 'stage', // Default select stage in history tab
       historySearchTerm: '',
       githubRepo: 'pride-erp-local/pride-erp-frontend'
     };
@@ -1404,6 +1395,11 @@
       } else {
         document.getElementById('tabBtn2').classList.add('active');
         document.getElementById('tab2').classList.add('active');
+        if (!config.historySelectedClient) {
+          config.historySelectedClient = 'stage';
+        }
+        renderHistoryClientFilterButtons();
+        renderTab2History();
       }
     }
 
@@ -1623,7 +1619,7 @@
 
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        const flagName = targetFlag === 0 ? '0 • Deployable' : '1 • Has Issue';
+        const flagName = targetFlag === 0 ? 'Deployable' : 'Has Issue';
         showToast(`✅ ${client.toUpperCase()} History (#${idNum}): ${flagName}`);
       } catch (err) {
         console.error('Failed to update history deployable flag in DB:', err);
@@ -1658,7 +1654,7 @@
 
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        const flagName = targetFlag === 0 ? 'Deployable (0)' : 'Has Issue / Not Deployable (1)';
+        const flagName = targetFlag === 0 ? 'Deployable' : 'Has Issue';
         showToast(`✅ ${client.toUpperCase()}: Updated to ${flagName}`);
       } catch (err) {
         console.error('Failed to update deployable flag in DB:', err);
@@ -1673,14 +1669,6 @@
     }
 
     // Filter Handlers
-    function setHistoryDeployableFilter(val) {
-      config.historyDeployableFilter = val;
-      document.querySelectorAll('[data-hist-deployable]').forEach(btn => {
-        btn.classList.toggle('active', btn.getAttribute('data-hist-deployable') === String(val));
-      });
-      renderTab2History();
-    }
-
     function setClientStatusFilter(status) {
       config.clientStatusFilter = status;
       document.querySelectorAll('[data-filter]').forEach(btn => {
@@ -1971,11 +1959,11 @@
       const container = document.getElementById('historyClientFilterGroup');
       if (!container) return;
 
-      const entries = getAllHistoryEntries();
-      const totalAll = entries.length;
+      const allList = (mergedHistory && mergedHistory.length > 0) ? mergedHistory : [];
+      const totalAll = allList.length;
       const clientStats = {};
 
-      entries.forEach(e => {
+      allList.forEach(e => {
         const c = (e.client_name || '').toLowerCase();
         clientStats[c] = (clientStats[c] || 0) + 1;
       });
@@ -1993,7 +1981,7 @@
       uniqueClients.forEach(c => {
         const isAll = c === 'all';
         const count = isAll ? totalAll : (clientStats[c] || 0);
-        const isActive = config.historySelectedClient === c;
+        const isActive = (config.historySelectedClient || '').toLowerCase() === c;
         const label = isAll ? 'All Clients' : c.toUpperCase();
         html += `
           <button class="filter-btn ${isActive ? 'active' : ''}" 
@@ -2062,35 +2050,34 @@
       const badgeCount = document.getElementById('historyCountBadge');
 
       const allEntries = getAllHistoryEntries();
+      const isStageSelected = (config.historySelectedClient || '').toLowerCase() === 'stage';
+
+      // Show/hide Deployable column header based on whether Stage is selected
+      const thDeployable = document.getElementById('thHistDeployable');
+      if (thDeployable) {
+        thDeployable.style.display = isStageSelected ? '' : 'none';
+      }
 
       // Update hero banner based on selected client
       if (config.historySelectedClient === 'all') {
-        heroTitle.innerText = 'Stage deployment history';
+        heroTitle.innerText = 'All Clients Deployment History';
         heroActiveClient.innerText = 'ALL';
         const activeStage = dbDeployments.find(c => (c.client_name || '').toLowerCase() === 'stage');
         heroActiveVer.innerText = activeStage ? `F: ${activeStage.frontend_version} | B: ${activeStage.backend_version}` : '--';
         heroSubtext.innerText = `Unified timeline of release deployments across all ${dbDeployments.length || 6} target client boxes`;
       } else {
         const cName = config.historySelectedClient.toUpperCase();
-        const clientRec = dbDeployments.find(c => (c.client_name || '').toLowerCase() === config.historySelectedClient);
-        heroTitle.innerText = `${cName} Deployment History`;
+        const clientRec = dbDeployments.find(c => (c.client_name || '').toLowerCase() === config.historySelectedClient.toLowerCase());
+        heroTitle.innerText = `${cName === 'STAGE' ? 'Stage' : cName} Deployment History`;
         heroActiveClient.innerText = cName;
         heroActiveVer.innerText = clientRec ? `F: ${clientRec.frontend_version} | B: ${clientRec.backend_version}` : '--';
-        heroSubtext.innerText = `Full release progression and merged version timeline for ${cName}`;
-      }
-
-      // Filter by deployable flag (0 = Ready, 1 = Has Issue)
-      let filtered = allEntries;
-      if (config.historyDeployableFilter && config.historyDeployableFilter !== 'all') {
-        const targetVal = parseInt(config.historyDeployableFilter, 10);
-        filtered = filtered.filter(item => {
-          const clientRec = dbDeployments.find(c => (c.client_name || '').toLowerCase() === (item.client_name || '').toLowerCase());
-          const flag = clientRec ? (clientRec.is_deployable_to_client ?? 0) : 0;
-          return flag === targetVal;
-        });
+        heroSubtext.innerText = cName === 'STAGE'
+          ? 'Chronological release progression and client deployable management'
+          : `Full release progression and merged version timeline for ${cName}`;
       }
 
       // Filter by search query
+      let filtered = allEntries;
       if (config.historySearchTerm) {
         const q = config.historySearchTerm.toLowerCase();
         filtered = filtered.filter(item =>
@@ -2103,7 +2090,9 @@
       }
 
       heroHistoryCount.innerText = filtered.length;
-      if (badgeCount) badgeCount.innerText = allEntries.length;
+      if (badgeCount) {
+        badgeCount.innerText = (mergedHistory && mergedHistory.length > 0) ? mergedHistory.length : allEntries.length;
+      }
 
       if (filtered.length === 0) {
         historyTableBody.innerHTML = '';
@@ -2112,7 +2101,8 @@
           emptyTitle.innerText = 'No Deployment History Recorded Yet';
           emptyText.innerText = 'Deployments from GitHub Actions will automatically stream here.';
         } else {
-          historyTableBody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding: 32px; color:var(--text-muted)">No matching records found for active filters</td></tr>`;
+          const colSpan = isStageSelected ? 8 : 7;
+          historyTableBody.innerHTML = `<tr><td colspan="${colSpan}" style="text-align:center; padding: 32px; color:var(--text-muted)">No matching records found for active filters</td></tr>`;
         }
         return;
       }
@@ -2190,19 +2180,21 @@
               ` : '<span style="color:var(--text-muted)">-</span>')}
             </td>
 
+            ${isStageSelected ? `
             <!-- 8. Deployable to Client: Green by default (0), Red on change (1) -->
             <td>
               <button 
                 class="toggle-switch-btn ${isDeployable ? 'state-green' : 'state-red'}" 
                 onclick="handleHistoryDeployableToggle(${dtlId}, '${escapeHtml(item.client_name)}', ${targetFlag})"
-                title="Click to toggle (Green 0: Deployable, Red 1: Has Issue)"
+                title="Click to toggle (Green: Deployable, Red: Has Issue)"
               >
                 <span class="toggle-slider">
                   <span class="toggle-knob"></span>
                 </span>
-                <span class="toggle-label">${isDeployable ? '0 &bull; Deployable' : '1 &bull; Has Issue'}</span>
+                <span class="toggle-label">${isDeployable ? 'Deployable' : 'Has Issue'}</span>
               </button>
             </td>
+            ` : ''}
           </tr>
         `;
       }).join('');

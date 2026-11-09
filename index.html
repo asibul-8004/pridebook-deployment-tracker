@@ -524,51 +524,77 @@
       border: 1px solid rgba(168, 85, 247, 0.35);
     }
 
-    /* Deployable to Client Toggle Widget */
-    .deployable-toggle-cell {
+    /* Switchable Toggle Button (Green by default 0, Red on button change 1) */
+    .toggle-switch-btn {
       display: inline-flex;
       align-items: center;
       gap: 8px;
-    }
-    .deployable-checkbox {
-      width: 17px;
-      height: 17px;
-      cursor: pointer;
-      accent-color: #ef4444; /* Checked indicates Issue (1) */
-      vertical-align: middle;
-      border-radius: 4px;
-    }
-    .deployable-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      padding: 3px 9px;
+      padding: 3px 10px 3px 4px;
       border-radius: 9999px;
-      font-size: 0.75rem;
+      font-size: 0.76rem;
       font-weight: 600;
       cursor: pointer;
+      border: 1px solid transparent;
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+      background: transparent;
       user-select: none;
-      transition: all var(--transition-speed);
+      line-height: 1;
     }
-    .deployable-pill.ok {
-      background: rgba(16, 185, 129, 0.15);
-      color: #10b981;
-      border: 1px solid rgba(16, 185, 129, 0.35);
+    .toggle-switch-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
     }
-    .deployable-pill.ok:hover {
-      background: rgba(16, 185, 129, 0.28);
-      transform: scale(1.02);
+    .toggle-switch-btn:active {
+      transform: translateY(0);
     }
-    .deployable-pill.issue {
-      background: rgba(239, 68, 68, 0.15);
-      color: #ef4444;
-      border: 1px solid rgba(239, 68, 68, 0.4);
+    .toggle-switch-btn .toggle-slider {
+      position: relative;
+      width: 32px;
+      height: 18px;
+      border-radius: 12px;
+      transition: background-color 0.25s ease;
+      display: inline-block;
+      flex-shrink: 0;
     }
-    .deployable-pill.issue:hover {
-      background: rgba(239, 68, 68, 0.28);
-      transform: scale(1.02);
+    .toggle-switch-btn .toggle-knob {
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background-color: #ffffff;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+      transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
     }
+    .toggle-switch-btn .toggle-label {
       white-space: nowrap;
+    }
+
+    /* Green state: 0 = Deployable by default */
+    .toggle-switch-btn.state-green {
+      background: rgba(16, 185, 129, 0.12);
+      border-color: rgba(16, 185, 129, 0.4);
+      color: #10b981;
+    }
+    .toggle-switch-btn.state-green .toggle-slider {
+      background-color: #10b981;
+    }
+    .toggle-switch-btn.state-green .toggle-knob {
+      transform: translateX(0);
+    }
+
+    /* Red state: 1 = Has Issue */
+    .toggle-switch-btn.state-red {
+      background: rgba(239, 68, 68, 0.12);
+      border-color: rgba(239, 68, 68, 0.45);
+      color: #ef4444;
+    }
+    .toggle-switch-btn.state-red .toggle-slider {
+      background-color: #ef4444;
+    }
+    .toggle-switch-btn.state-red .toggle-knob {
+      transform: translateX(14px);
     }
 
     .status-badge.success {
@@ -1074,7 +1100,7 @@
             <circle cx="12" cy="12" r="10"></circle>
             <polyline points="12 6 12 12 16 14"></polyline>
           </svg>
-          <span>Deployment History</span>
+          <span>Stage deployment history</span>
           <span class="tab-badge" id="historyCountBadge">0</span>
         </button>
       </div>
@@ -1163,14 +1189,6 @@
           <input type="text" id="clientSearchInput" placeholder="Filter by client name, version, or user..." oninput="handleClientFilterChange()" />
         </div>
 
-        <!-- Deployable Filter Buttons (0 = Deployable, 1 = Has Issue) -->
-        <div class="filter-group">
-          <span style="font-size:0.75rem; color:var(--text-muted); font-weight:600; text-transform:uppercase;">Deployable:</span>
-          <button class="filter-btn active" data-deployable="all" onclick="setDeployableFilter('all')">All</button>
-          <button class="filter-btn" data-deployable="0" onclick="setDeployableFilter('0')">✓ Ready (0)</button>
-          <button class="filter-btn" data-deployable="1" onclick="setDeployableFilter('1')">⚠ Issue (1)</button>
-        </div>
-
         <div class="filter-group">
           <button class="filter-btn active" data-filter="all" onclick="setClientStatusFilter('all')">All Status</button>
           <button class="filter-btn" data-filter="success" onclick="setClientStatusFilter('success')">Deployed</button>
@@ -1214,7 +1232,6 @@
               <th>Status</th>
               <th>Frontend Deploy At</th>
               <th>Backend Deploy At</th>
-              <th>Deployable to Client</th>
             </tr>
           </thead>
           <tbody id="clientTableBody">
@@ -1232,7 +1249,7 @@
 
 
     <!-- ========================================== -->
-    <!-- TAB 2: DEPLOYMENT HISTORY (ALL CLIENTS)    -->
+    <!-- TAB 2: STAGE DEPLOYMENT HISTORY            -->
     <!-- ========================================== -->
     <section class="tab-pane" id="tab2">
       
@@ -1244,14 +1261,14 @@
               <polyline points="16 18 22 12 16 6"></polyline>
               <polyline points="8 6 2 12 8 18"></polyline>
             </svg>
-            <span id="historyHeroTitle">Client Deployment History</span>
+            <span id="historyHeroTitle">Stage deployment history</span>
           </h2>
-          <p id="historyHeroSubtext">Loading deployment records from GitHub...</p>
+          <p id="historyHeroSubtext">Chronological release progression and client deployable management</p>
         </div>
 
         <div class="stage-hero-stat">
           <div class="stage-pill-box">
-            <div class="tag">Selected Client</div>
+            <div class="tag">Selected Box</div>
             <div class="number" id="historyHeroActiveClient" style="font-size: 1.1rem;">ALL</div>
           </div>
           <div class="stage-pill-box">
@@ -1272,12 +1289,20 @@
           <!-- Dynamically populated buttons -->
         </div>
 
+        <!-- Deployable Filter Buttons for History (0 = Deployable, 1 = Has Issue) -->
+        <div class="filter-group">
+          <span style="font-size:0.75rem; color:var(--text-muted); font-weight:600; text-transform:uppercase;">Deployable:</span>
+          <button class="filter-btn active" data-hist-deployable="all" onclick="setHistoryDeployableFilter('all')">All</button>
+          <button class="filter-btn" data-hist-deployable="0" onclick="setHistoryDeployableFilter('0')">✓ 0 Ready</button>
+          <button class="filter-btn" data-hist-deployable="1" onclick="setHistoryDeployableFilter('1')">⚠ 1 Issue</button>
+        </div>
+
         <div class="search-box">
           <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="11" cy="11" r="8"></circle>
             <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
           </svg>
-          <input type="text" id="historySearchInput" placeholder="Filter history by client, version, user, or run ID..." oninput="handleHistoryFilterChange()" />
+          <input type="text" id="historySearchInput" placeholder="Filter history by client, version, or user..." oninput="handleHistoryFilterChange()" />
         </div>
       </div>
 
@@ -1288,13 +1313,12 @@
             <tr>
               <th style="width: 50px;">#</th>
               <th>Client Box</th>
-              <th>Trigger</th>
               <th>Frontend Version</th>
               <th>Backend Version</th>
               <th>Status</th>
-              <th>Deployed At</th>
-              <th>Deployed By</th>
-              <th>GitHub Run ID</th>
+              <th>Frontend Deploy At</th>
+              <th>Backend Deploy At</th>
+              <th>Deployable to Client</th>
             </tr>
           </thead>
           <tbody id="historyTableBody">
@@ -1330,9 +1354,9 @@
       theme: localStorage.getItem('pride_theme') || 'dark',
       clientView: 'table', // By default in list/table mode
       clientStatusFilter: 'all',
-      clientDeployableFilter: 'all', // 'all', '0', '1'
       clientSearchTerm: '',
       historySelectedClient: 'all',
+      historyDeployableFilter: 'all', // 'all', '0', '1'
       historySearchTerm: '',
       githubRepo: 'pride-erp-local/pride-erp-frontend'
     };
@@ -1611,6 +1635,7 @@
         rec.is_deployable_to_client = targetFlag;
         renderMetrics();
         renderTab1Clients();
+        renderTab2History();
       }
 
       try {
@@ -1635,17 +1660,18 @@
           rec.is_deployable_to_client = targetFlag === 0 ? 1 : 0;
           renderMetrics();
           renderTab1Clients();
+          renderTab2History();
         }
       }
     }
 
     // Filter Handlers
-    function setDeployableFilter(val) {
-      config.clientDeployableFilter = val;
-      document.querySelectorAll('[data-deployable]').forEach(btn => {
-        btn.classList.toggle('active', btn.getAttribute('data-deployable') === String(val));
+    function setHistoryDeployableFilter(val) {
+      config.historyDeployableFilter = val;
+      document.querySelectorAll('[data-hist-deployable]').forEach(btn => {
+        btn.classList.toggle('active', btn.getAttribute('data-hist-deployable') === String(val));
       });
-      renderTab1Clients();
+      renderTab2History();
     }
 
     function setClientStatusFilter(status) {
@@ -1661,18 +1687,12 @@
       renderTab1Clients();
     }
 
-    // TAB 1 Rendering
+    // TAB 1 Rendering: All Clients (Latest Version)
     function renderTab1Clients() {
       const grid = document.getElementById('clientGridContainer');
       const tableBody = document.getElementById('clientTableBody');
 
       let filtered = dbDeployments.filter(r => {
-        // Deployable Filter (0 or 1)
-        if (config.clientDeployableFilter !== 'all') {
-          const targetVal = parseInt(config.clientDeployableFilter, 10);
-          if (r.is_deployable_to_client !== targetVal) return false;
-        }
-
         // Status filter
         if (config.clientStatusFilter !== 'all') {
           const s = (r.status || '').toLowerCase();
@@ -1695,7 +1715,7 @@
       });
 
       if (filtered.length === 0) {
-        tableBody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding: 32px; color:var(--text-muted)">No matching client deployments found</td></tr>`;
+        tableBody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding: 32px; color:var(--text-muted)">No matching client deployments found</td></tr>`;
         grid.innerHTML = `<div style="grid-column: 1/-1; text-align:center; padding: 32px; color:var(--text-muted)">No matching client deployments found</div>`;
         return;
       }
@@ -1766,7 +1786,6 @@
       const isBUnknown = !r.backend_version || r.backend_version === 'unknown';
       const initials = getInitials(r.client_name);
       const isStage = (r.client_name || '').toLowerCase() === 'stage';
-      const isDeployable = r.is_deployable_to_client === 0;
 
       return `
         <tr>
@@ -1817,26 +1836,6 @@
               <small style="color:var(--text-muted); font-size:0.75rem;">${formatRelativeTime(r.backend_deployed_at)}</small>
             ` : '<span style="color:var(--text-muted)">-</span>'}
           </td>
-
-          <!-- 7. Deployable to Client -->
-          <td>
-            <div class="deployable-toggle-cell">
-              <input 
-                type="checkbox" 
-                class="deployable-checkbox" 
-                ${!isDeployable ? 'checked' : ''} 
-                title="Toggle deployable status (0 = Deployable, 1 = Has Issue)"
-                onchange="handleDeployableToggle(${r.id || `'${escapeHtml(r.client_name)}'`}, '${escapeHtml(r.client_name)}', this.checked ? 1 : 0)" 
-              />
-              <span 
-                class="deployable-pill ${isDeployable ? 'ok' : 'issue'}" 
-                onclick="handleDeployableToggle(${r.id || `'${escapeHtml(r.client_name)}'`}, '${escapeHtml(r.client_name)}', ${isDeployable ? 1 : 0})"
-                title="Click to toggle (0: Deployable, 1: Has Issue)"
-              >
-                ${isDeployable ? '✓ Deployable (0)' : '⚠ Issue (1)'}
-              </span>
-            </div>
-          </td>
         </tr>
       `;
     }
@@ -1845,7 +1844,6 @@
     function renderClientCard(r) {
       const initials = getInitials(r.client_name);
       const isStage = (r.client_name || '').toLowerCase() === 'stage';
-      const isDeployable = r.is_deployable_to_client === 0;
 
       return `
         <div class="client-card ${isStage ? 'is-stage' : 'is-client'}">
@@ -1859,25 +1857,6 @@
                 </div>
               </div>
               <div>${getStatusBadge(r.status)}</div>
-            </div>
-
-            <!-- Deployable Flag Widget in Card -->
-            <div style="margin-bottom:14px; padding:10px 14px; background:var(--bg-card-inner); border-radius:8px; display:flex; align-items:center; justify-content:space-between; border:1px solid var(--border-color);">
-              <span style="font-size:0.8rem; font-weight:600; color:var(--text-secondary);">Deployable to Client:</span>
-              <div class="deployable-toggle-cell">
-                <input 
-                  type="checkbox" 
-                  class="deployable-checkbox" 
-                  ${!isDeployable ? 'checked' : ''} 
-                  onchange="handleDeployableToggle(${r.id || `'${escapeHtml(r.client_name)}'`}, '${escapeHtml(r.client_name)}', this.checked ? 1 : 0)" 
-                />
-                <span 
-                  class="deployable-pill ${isDeployable ? 'ok' : 'issue'}" 
-                  onclick="handleDeployableToggle(${r.id || `'${escapeHtml(r.client_name)}'`}, '${escapeHtml(r.client_name)}', ${isDeployable ? 1 : 0})"
-                >
-                  ${isDeployable ? '✓ Ready (0)' : '⚠ Issue (1)'}
-                </span>
-              </div>
             </div>
 
             <!-- Frontend & Backend Versions Side-by-Side -->
@@ -2079,7 +2058,7 @@
 
       // Update hero banner based on selected client
       if (config.historySelectedClient === 'all') {
-        heroTitle.innerText = 'All Clients Deployment History';
+        heroTitle.innerText = 'Stage deployment history';
         heroActiveClient.innerText = 'ALL';
         const activeStage = dbDeployments.find(c => (c.client_name || '').toLowerCase() === 'stage');
         heroActiveVer.innerText = activeStage ? `F: ${activeStage.frontend_version} | B: ${activeStage.backend_version}` : '--';
@@ -2093,11 +2072,18 @@
         heroSubtext.innerText = `Full release progression and merged version timeline for ${cName}`;
       }
 
-      heroHistoryCount.innerText = allEntries.length;
-      if (badgeCount) badgeCount.innerText = allEntries.length;
+      // Filter by deployable flag (0 = Ready, 1 = Has Issue)
+      let filtered = allEntries;
+      if (config.historyDeployableFilter && config.historyDeployableFilter !== 'all') {
+        const targetVal = parseInt(config.historyDeployableFilter, 10);
+        filtered = filtered.filter(item => {
+          const clientRec = dbDeployments.find(c => (c.client_name || '').toLowerCase() === (item.client_name || '').toLowerCase());
+          const flag = clientRec ? (clientRec.is_deployable_to_client ?? 0) : 0;
+          return flag === targetVal;
+        });
+      }
 
       // Filter by search query
-      let filtered = allEntries;
       if (config.historySearchTerm) {
         const q = config.historySearchTerm.toLowerCase();
         filtered = filtered.filter(item =>
@@ -2109,19 +2095,17 @@
         );
       }
 
+      heroHistoryCount.innerText = filtered.length;
+      if (badgeCount) badgeCount.innerText = allEntries.length;
+
       if (filtered.length === 0) {
         historyTableBody.innerHTML = '';
         emptyState.style.display = allEntries.length === 0 ? 'block' : 'none';
         if (allEntries.length === 0) {
-          if (config.historySelectedClient === 'all') {
-            emptyTitle.innerText = 'No Deployment History Recorded Yet';
-            emptyText.innerText = 'Deployments from GitHub Actions will automatically stream here.';
-          } else {
-            emptyTitle.innerText = `No History Recorded for ${heroActiveClient.innerText}`;
-            emptyText.innerText = `Target box ${heroActiveClient.innerText} has not deployed any historical releases yet.`;
-          }
+          emptyTitle.innerText = 'No Deployment History Recorded Yet';
+          emptyText.innerText = 'Deployments from GitHub Actions will automatically stream here.';
         } else {
-          historyTableBody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding: 32px; color:var(--text-muted)">No matching records found for "${escapeHtml(config.historySearchTerm)}"</td></tr>`;
+          historyTableBody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding: 32px; color:var(--text-muted)">No matching records found for active filters</td></tr>`;
         }
         return;
       }
@@ -2131,14 +2115,22 @@
       historyTableBody.innerHTML = filtered.map((item, idx) => {
         const initials = getInitials(item.client_name);
         const isStage = (item.client_name || '').toLowerCase() === 'stage';
-        const isF = item.event_stack === 'F';
-        const runDisplay = item.run_id 
-          ? `<span style="font-family: monospace; font-size: 0.85rem; color: var(--text-secondary);">#${escapeHtml(item.run_id)}</span>`
-          : '<span style="color:var(--text-muted)">-</span>';
+
+        // Retrieve current deployable status for this client from dbDeployments
+        const clientRec = dbDeployments.find(c => (c.client_name || '').toLowerCase() === (item.client_name || '').toLowerCase());
+        const isDeployable = clientRec ? clientRec.is_deployable_to_client === 0 : true;
+        const targetFlag = isDeployable ? 1 : 0;
+        const clientId = clientRec ? (clientRec.id || clientRec.deployment_tracker_no) : `'${escapeHtml(item.client_name)}'`;
+
+        const isFUnknown = !item.frontend_version || item.frontend_version === 'unknown';
+        const isBUnknown = !item.backend_version || item.backend_version === 'unknown';
 
         return `
           <tr>
+            <!-- 1. # -->
             <td style="color:var(--text-muted); font-size: 0.8rem; font-family: monospace;">#${idx + 1}</td>
+
+            <!-- 2. Client Box -->
             <td>
               <div class="client-cell" style="cursor: pointer;" onclick="setHistoryClientFilter('${escapeHtml(item.client_name)}')">
                 <div class="client-avatar-sm">${initials}</div>
@@ -2148,30 +2140,63 @@
                 </div>
               </div>
             </td>
-            <td>
-              <span class="stack-badge ${isF ? 'stack-f' : 'stack-b'}" style="padding: 2px 8px; font-size: 0.75rem;">
-                ${isF ? 'F &bull; Frontend' : 'B &bull; Backend'}
-              </span>
-            </td>
+
+            <!-- 3. Frontend Version -->
             <td>
               <div style="display:flex; align-items:center; gap:6px;">
+                <span class="stack-badge stack-f" style="padding: 1px 6px; font-size: 0.7rem;">F</span>
                 <span class="table-ver" style="font-size: 0.95rem;">${escapeHtml(item.frontend_version || 'unknown')}</span>
-                ${item.frontend_version && item.frontend_version !== 'unknown' ? `<button class="btn-copy" style="padding: 2px 6px;" onclick="copyText('${escapeHtml(item.frontend_version)}')">copy</button>` : ''}
+                ${!isFUnknown ? `<button class="btn-copy" style="padding: 2px 6px;" onclick="copyText('${escapeHtml(item.frontend_version)}')">copy</button>` : ''}
               </div>
             </td>
+
+            <!-- 4. Backend Version -->
             <td>
               <div style="display:flex; align-items:center; gap:6px;">
+                <span class="stack-badge stack-b" style="padding: 1px 6px; font-size: 0.7rem;">B</span>
                 <span class="table-ver" style="font-size: 0.95rem;">${escapeHtml(item.backend_version || 'unknown')}</span>
-                ${item.backend_version && item.backend_version !== 'unknown' ? `<button class="btn-copy" style="padding: 2px 6px;" onclick="copyText('${escapeHtml(item.backend_version)}')">copy</button>` : ''}
+                ${!isBUnknown ? `<button class="btn-copy" style="padding: 2px 6px;" onclick="copyText('${escapeHtml(item.backend_version)}')">copy</button>` : ''}
               </div>
             </td>
+
+            <!-- 5. Status -->
             <td>${getStatusBadge(item.status)}</td>
+
+            <!-- 6. Frontend Deploy At -->
             <td>
-              ${formatDateTime(item.event_time)}
-              <small style="color:var(--text-muted); display:block; font-size: 0.75rem;">${formatRelativeTime(item.event_time)}</small>
+              ${item.frontend_deployed_at ? `
+                <div>${formatDateTime(item.frontend_deployed_at)}</div>
+                <small style="color:var(--text-muted); font-size:0.75rem;">${formatRelativeTime(item.frontend_deployed_at)}</small>
+              ` : (item.event_stack === 'F' && item.event_time ? `
+                <div>${formatDateTime(item.event_time)}</div>
+                <small style="color:var(--text-muted); font-size:0.75rem;">${formatRelativeTime(item.event_time)}</small>
+              ` : '<span style="color:var(--text-muted)">-</span>')}
             </td>
-            <td><strong>${escapeHtml(item.deployed_by || '-')}</strong></td>
-            <td>${runDisplay}</td>
+
+            <!-- 7. Backend Deploy At -->
+            <td>
+              ${item.backend_deployed_at ? `
+                <div>${formatDateTime(item.backend_deployed_at)}</div>
+                <small style="color:var(--text-muted); font-size:0.75rem;">${formatRelativeTime(item.backend_deployed_at)}</small>
+              ` : (item.event_stack === 'B' && item.event_time ? `
+                <div>${formatDateTime(item.event_time)}</div>
+                <small style="color:var(--text-muted); font-size:0.75rem;">${formatRelativeTime(item.event_time)}</small>
+              ` : '<span style="color:var(--text-muted)">-</span>')}
+            </td>
+
+            <!-- 8. Deployable to Client: Green by default (0), Red on change (1) -->
+            <td>
+              <button 
+                class="toggle-switch-btn ${isDeployable ? 'state-green' : 'state-red'}" 
+                onclick="handleDeployableToggle(${clientId}, '${escapeHtml(item.client_name)}', ${targetFlag})"
+                title="Click to toggle (Green 0: Deployable, Red 1: Has Issue)"
+              >
+                <span class="toggle-slider">
+                  <span class="toggle-knob"></span>
+                </span>
+                <span class="toggle-label">${isDeployable ? '0 &bull; Deployable' : '1 &bull; Has Issue'}</span>
+              </button>
+            </td>
           </tr>
         `;
       }).join('');

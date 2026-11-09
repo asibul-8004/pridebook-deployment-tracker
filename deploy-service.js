@@ -1,6 +1,6 @@
 /**
  * Deploy Service - GitHub Workflow Trigger & Status Tracking
- * Handles dual trigger of release-deploy.yml for frontend and backend repositories
+ * Handles authentication, selective execution, deployability checks, and cancellation
  */
 
 const fs = require('fs');
@@ -8,6 +8,33 @@ const path = require('path');
 const db = require('./db');
 
 const rootDir = __dirname;
+
+function loadEnv() {
+  const envPath = path.join(rootDir, '.env');
+  if (fs.existsSync(envPath)) {
+    try {
+      const content = fs.readFileSync(envPath, 'utf8');
+      const lines = content.split('\n');
+      for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line || line.startsWith('#')) continue;
+        const eqIdx = line.indexOf('=');
+        if (eqIdx !== -1) {
+          const key = line.slice(0, eqIdx).trim();
+          let val = line.slice(eqIdx + 1).trim();
+          if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+            val = val.slice(1, -1);
+          }
+          if (['USERNAME', 'PASSWORD', 'AUTH_USERNAME', 'AUTH_PASSWORD'].includes(key) || process.env[key] === undefined) {
+            process.env[key] = val;
+          }
+        }
+      }
+    } catch (_) {}
+  }
+}
+loadEnv();
+
 function getEnv(key, fallback = '') {
   return process.env[key] || fallback;
 }
@@ -22,6 +49,71 @@ function getHeaders(token) {
     headers['Authorization'] = `token ${effectiveToken.trim()}`;
   }
   return headers;
+}
+
+/**
+ * Validate credentials against ENV file
+ */
+function verifyCredentials(username, password) {
+  loadEnv();
+  const expectedUser = (process.env.AUTH_USERNAME || (process.env.USERNAME && process.env.USERNAME !== process.env.USER ? process.env.USERNAME : null) || 'pridebook').trim();
+  const expectedPass = (process.env.AUTH_PASSWORD || process.env.PASSWORD || 'prideerp').trim();
+  return (
+    Boolean(username) &&
+    Boolean(password) &&
+    String(username).trim() === expectedUser &&
+    String(password).trim() === expectedPass
+  );
+}
+
+/**
+ * Check if a version is deployable to client (non-stage)
+ * If Deployable to Client == 1, it's flagged as non-deployable (has issue)
+ */
+async function checkDeployability({ client, frontend_tag, backend_tag }) {
+  const targetClient = (client || '').toLowerCase().trim();
+  if (!targetClient || targetClient === 'stage') {
+    return {
+      isStage: true,
+      frontend: { deployable: true, message: '' },
+      backend: { deployable: true, message: '' }
+    };
+  }
+
+  const history = await db.getDeploymentHistory();
+  const res = {
+    isStage: false,
+    frontend: { deployable: true, message: '' },
+    backend: { deployable: true, message: '' }
+  };
+
+  if (frontend_tag && frontend_tag.trim()) {
+    const fTag = frontend_tag.trim();
+    const blockedF = (history || []).find(h =>
+      h.event_stack === 'F' &&
+      h.frontend_version === fTag &&
+      Number(h.is_deployable_to_client) === 1
+    );
+    if (blockedF) {
+      res.frontend.deployable = false;
+      res.frontend.message = `Frontend version [${fTag}] is flagged as non-deployable`;
+    }
+  }
+
+  if (backend_tag && backend_tag.trim()) {
+    const bTag = backend_tag.trim();
+    const blockedB = (history || []).find(h =>
+      h.event_stack === 'B' &&
+      h.backend_version === bTag &&
+      Number(h.is_deployable_to_client) === 1
+    );
+    if (blockedB) {
+      res.backend.deployable = false;
+      res.backend.message = `Backend version [${bTag}] is flagged as non-deployable`;
+    }
+  }
+
+  return res;
 }
 
 /**
@@ -58,21 +150,69 @@ async function getReleaseTags(token) {
 }
 
 /**
- * Trigger both Frontend and Backend release-deploy.yml workflows
+ * Trigger Release Deployment with selective execution, authentication, and deployability validation
  */
-async function triggerDualDeploy({ client, frontend_tag, backend_tag, token }) {
+async function triggerReleaseDeploy({
+  client,
+  frontend_tag,
+  backend_tag,
+  username,
+  password,
+  token
+}) {
+  // 1. Authentication check
+  if (!verifyCredentials(username, password)) {
+    const err = new Error('Invalid username or password');
+    err.statusCode = 401;
+    throw err;
+  }
+
   const targetClient = (client || '').toLowerCase().trim();
   const allowedClients = ['stage', 'shinshin', 'karupannya', 'bengal', 'arrival', 'ananta-uat', 'ananta-live'];
   if (!allowedClients.includes(targetClient)) {
     throw new Error(`Invalid client '${targetClient}'. Allowed: ${allowedClients.join(', ')}`);
   }
 
-  const tagRegex = /^v[0-9]+\.[0-9]+\.[0-9]+$/;
-  if (!frontend_tag || !tagRegex.test(frontend_tag.trim())) {
-    throw new Error(`Invalid frontend tag '${frontend_tag}'. Must match strict vX.Y.Z (e.g. v1.42.0)`);
+  const fTag = (frontend_tag || '').trim();
+  const bTag = (backend_tag || '').trim();
+
+  // 2. Selective Execution: require at least one version
+  if (!fTag && !bTag) {
+    throw new Error('Please specify at least a Frontend Version or a Backend Version');
   }
-  if (!backend_tag || !tagRegex.test(backend_tag.trim())) {
-    throw new Error(`Invalid backend tag '${backend_tag}'. Must match strict vX.Y.Z (e.g. v2.10.2)`);
+
+  const tagRegex = /^v[0-9]+\.[0-9]+\.[0-9]+$/;
+  if (fTag && !tagRegex.test(fTag)) {
+    throw new Error(`Invalid frontend tag '${fTag}'. Must match strict vX.Y.Z (e.g. v1.42.0)`);
+  }
+  if (bTag && !tagRegex.test(bTag)) {
+    throw new Error(`Invalid backend tag '${bTag}'. Must match strict vX.Y.Z (e.g. v2.10.2)`);
+  }
+
+  // 3. Client & Version Deployability Validation
+  const deployability = await checkDeployability({
+    client: targetClient,
+    frontend_tag: fTag,
+    backend_tag: bTag
+  });
+
+  const fDeployable = deployability.frontend.deployable;
+  const bDeployable = deployability.backend.deployable;
+
+  const fShouldRun = Boolean(fTag && fDeployable);
+  const bShouldRun = Boolean(bTag && bDeployable);
+
+  const blockedWarnings = [];
+  if (fTag && !fDeployable) {
+    blockedWarnings.push(deployability.frontend.message);
+  }
+  if (bTag && !bDeployable) {
+    blockedWarnings.push(deployability.backend.message);
+  }
+
+  // If no requested component is deployable, reject
+  if (!fShouldRun && !bShouldRun) {
+    throw new Error(blockedWarnings.join('. '));
   }
 
   const fRepo = getEnv('GITHUB_FRONTEND_REPO') || getEnv('GITHUB_REPO') || 'pride-erp-local/pride-erp-frontend';
@@ -99,7 +239,7 @@ async function triggerDualDeploy({ client, frontend_tag, backend_tag, token }) {
     });
 
     if (res.status === 204) {
-      return { success: true, repo, tag: tag.trim(), client: targetClient };
+      return { success: true, repo, tag: tag.trim(), client: targetClient, stack: stackName };
     }
 
     const errText = await res.text();
@@ -111,19 +251,58 @@ async function triggerDualDeploy({ client, frontend_tag, backend_tag, token }) {
     throw new Error(`Failed to dispatch ${stackName} deploy on ${repo}: ${errMsg}`);
   };
 
-  const [fResult, bResult] = await Promise.all([
-    dispatchWorkflow(fRepo, frontend_tag, 'Frontend'),
-    dispatchWorkflow(bRepo, backend_tag, 'Backend')
-  ]);
+  const tasks = [];
+  if (fShouldRun) {
+    tasks.push(dispatchWorkflow(fRepo, fTag, 'Frontend'));
+  }
+  if (bShouldRun) {
+    tasks.push(dispatchWorkflow(bRepo, bTag, 'Backend'));
+  }
+
+  const results = await Promise.all(tasks);
+  const fResult = fShouldRun ? results.find(r => r.stack === 'Frontend') : null;
+  const bResult = bShouldRun ? results.find(r => r.stack === 'Backend') : null;
 
   return {
     success: true,
     client: targetClient,
     timestamp: new Date().toISOString(),
     frontend: fResult,
-    backend: bResult
+    backend: bResult,
+    warnings: blockedWarnings
   };
 }
+
+/**
+ * Cancel an active GitHub workflow run
+ */
+async function cancelDeployRun({ stack, run_id, token }) {
+  if (!run_id) throw new Error('Missing run_id to cancel');
+  const isBackend = stack && stack.toLowerCase().startsWith('b');
+  const repo = isBackend
+    ? (getEnv('GITHUB_BACKEND_REPO') || (getEnv('GITHUB_REPO') ? getEnv('GITHUB_REPO').replace(/-frontend$/, '-backend') : '') || 'pride-erp-local/pride-erp-backend')
+    : (getEnv('GITHUB_FRONTEND_REPO') || getEnv('GITHUB_REPO') || 'pride-erp-local/pride-erp-frontend');
+
+  const headers = getHeaders(token);
+  const url = `https://api.github.com/repos/${repo}/actions/runs/${run_id}/cancel`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers
+  });
+
+  if (res.status === 202) {
+    return { success: true, message: `Deployment run #${run_id} cancellation requested` };
+  }
+
+  let errMsg = `HTTP ${res.status}: ${res.statusText}`;
+  try {
+    const d = await res.json();
+    if (d.message) errMsg = d.message;
+  } catch (_) {}
+  throw new Error(`Failed to cancel run #${run_id}: ${errMsg}`);
+}
+
+const statusJobsCache = new Map();
 
 /**
  * Query live deployment status for recent release runs
@@ -136,38 +315,47 @@ async function getDeployStatus({ client, frontend_tag, backend_tag, token }) {
 
   async function checkRunStatus(repo, expectedTag, stackName) {
     try {
-      const runsUrl = `https://api.github.com/repos/${repo}/actions/workflows/release-deploy.yml/runs?per_page=10`;
+      const runsUrl = `https://api.github.com/repos/${repo}/actions/workflows/release-deploy.yml/runs?per_page=5`;
       const res = await fetch(runsUrl, { headers });
       if (!res.ok) {
         return { status: 'unknown', message: `HTTP ${res.status}` };
       }
       const data = await res.json();
-      const runs = data.workflow_runs || [];
+      const runs = (data.workflow_runs || []).slice(0, 3);
 
       // Find matching run
       for (const run of runs) {
         let matches = false;
         let activeJobName = '';
 
-        try {
-          const jobsRes = await fetch(run.jobs_url, { headers });
-          if (jobsRes.ok) {
-            const jobsData = await jobsRes.json();
-            for (const job of jobsData.jobs || []) {
-              const nameLower = job.name.toLowerCase();
-              if (
-                nameLower.includes(targetClient) ||
-                (expectedTag && nameLower.includes(expectedTag.toLowerCase()))
-              ) {
-                matches = true;
-                activeJobName = job.name;
-                break;
+        if (statusJobsCache.has(run.id)) {
+          const cached = statusJobsCache.get(run.id);
+          matches = cached.matches;
+          activeJobName = cached.activeJobName;
+        } else {
+          try {
+            const jobsRes = await fetch(run.jobs_url, { headers });
+            if (jobsRes.ok) {
+              const jobsData = await jobsRes.json();
+              for (const job of jobsData.jobs || []) {
+                const nameLower = job.name.toLowerCase();
+                if (
+                  nameLower.includes(targetClient) ||
+                  (expectedTag && nameLower.includes(expectedTag.toLowerCase()))
+                ) {
+                  matches = true;
+                  activeJobName = job.name;
+                  break;
+                }
               }
             }
-          }
-        } catch (_) {}
+          } catch (_) {}
 
-        // Fallback match: if run was created very recently (< 15 mins) and matches
+          if (run.status === 'completed') {
+            statusJobsCache.set(run.id, { matches, activeJobName });
+          }
+        }
+
         const createdMs = new Date(run.created_at).getTime();
         const isRecent = (Date.now() - createdMs) < (15 * 60 * 1000);
 
@@ -176,7 +364,9 @@ async function getDeployStatus({ client, frontend_tag, backend_tag, token }) {
           if (run.status === 'in_progress') {
             cardStatus = 'deploying';
           } else if (run.status === 'completed') {
-            cardStatus = run.conclusion === 'success' ? 'deployed' : 'failed';
+            if (run.conclusion === 'success') cardStatus = 'deployed';
+            else if (run.conclusion === 'cancelled') cardStatus = 'cancelled';
+            else cardStatus = 'failed';
           } else if (run.status === 'queued') {
             cardStatus = 'queued';
           }
@@ -203,8 +393,8 @@ async function getDeployStatus({ client, frontend_tag, backend_tag, token }) {
   }
 
   const [frontendStatus, backendStatus] = await Promise.all([
-    checkRunStatus(fRepo, frontend_tag, 'Frontend'),
-    checkRunStatus(bRepo, backend_tag, 'Backend')
+    frontend_tag ? checkRunStatus(fRepo, frontend_tag, 'Frontend') : Promise.resolve({ status: 'idle' }),
+    backend_tag ? checkRunStatus(bRepo, backend_tag, 'Backend') : Promise.resolve({ status: 'idle' })
   ]);
 
   return {
@@ -222,7 +412,6 @@ async function getRecentDeployments(token) {
   const fRepo = getEnv('GITHUB_FRONTEND_REPO') || getEnv('GITHUB_REPO') || 'pride-erp-local/pride-erp-frontend';
   const bRepo = getEnv('GITHUB_BACKEND_REPO') || (getEnv('GITHUB_REPO') ? getEnv('GITHUB_REPO').replace(/-frontend$/, '-backend') : '') || 'pride-erp-local/pride-erp-backend';
 
-  // 1. Primary: Use DB deployment history (SA_DEPLOYMENT_TRACKER_DTL) which already contains client_box
   try {
     const history = await db.getDeploymentHistory();
     if (Array.isArray(history) && history.length > 0) {
@@ -249,7 +438,6 @@ async function getRecentDeployments(token) {
     console.warn('[Recent Runs DB fallback warn]:', err.message);
   }
 
-  // 2. Fallback to GitHub API if DB is not available
   const headers = getHeaders(token);
   async function fetchRecent(repo, stack) {
     try {
@@ -284,8 +472,11 @@ async function getRecentDeployments(token) {
 }
 
 module.exports = {
+  verifyCredentials,
+  checkDeployability,
   getReleaseTags,
-  triggerDualDeploy,
+  triggerReleaseDeploy,
+  cancelDeployRun,
   getDeployStatus,
   getRecentDeployments
 };

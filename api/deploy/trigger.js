@@ -24,19 +24,24 @@ module.exports = async (req, res) => {
     const client = payload.client;
     const frontend_tag = payload.frontend_tag;
     const backend_tag = payload.backend_tag;
+    const username = payload.username;
+    const password = payload.password;
     const token = process.env.GITHUB_TOKEN || '';
 
-    const result = await deployService.triggerDualDeploy({
+    const result = await deployService.triggerReleaseDeploy({
       client,
       frontend_tag,
       backend_tag,
+      username,
+      password,
       token
     });
 
     res.setHeader('Content-Type', 'application/json');
     return res.status(200).json(result);
   } catch (err) {
+    const status = err.statusCode || 400;
     res.setHeader('Content-Type', 'application/json');
-    return res.status(400).json({ success: false, error: err.message });
+    return res.status(status).json({ success: false, error: err.message });
   }
 };

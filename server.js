@@ -31,7 +31,7 @@ function loadEnv() {
           if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
             val = val.slice(1, -1);
           }
-          if (process.env[key] === undefined) {
+          if (['USERNAME', 'PASSWORD', 'AUTH_USERNAME', 'AUTH_PASSWORD'].includes(key) || process.env[key] === undefined) {
             process.env[key] = val;
           }
         }
@@ -456,23 +456,94 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // POST /api/deploy/trigger - Dual trigger release-deploy.yml for frontend and backend
-  if (pathname === '/api/deploy/trigger' && req.method === 'POST') {
+  // POST /api/auth/login - Authenticate against USERNAME and PASSWORD env variables
+  if (pathname === '/api/auth/login' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const payload = JSON.parse(body || '{}');
+        const isValid = deployService.verifyCredentials(payload.username, payload.password);
+        if (isValid) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, message: 'Authentication successful' }));
+        } else {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'Invalid username or password' }));
+        }
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // GET /api/deploy/validate - Validate client & version deployability
+  if (pathname === '/api/deploy/validate' && req.method === 'GET') {
+    try {
+      const client = parsedUrl.searchParams.get('client') || '';
+      const frontend_tag = parsedUrl.searchParams.get('frontend_tag') || '';
+      const backend_tag = parsedUrl.searchParams.get('backend_tag') || '';
+      const result = await deployService.checkDeployability({
+        client,
+        frontend_tag,
+        backend_tag
+      });
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache, no-store, must-revalidate'
+      });
+      res.end(JSON.stringify({ success: true, ...result }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: err.message }));
+    }
+    return;
+  }
+
+  // POST /api/deploy/cancel - Cancel active GitHub Actions workflow run
+  if (pathname === '/api/deploy/cancel' && req.method === 'POST') {
     let body = '';
     req.on('data', chunk => { body += chunk; });
     req.on('end', async () => {
       try {
         const payload = JSON.parse(body || '{}');
-        const result = await deployService.triggerDualDeploy({
-          client: payload.client,
-          frontend_tag: payload.frontend_tag,
-          backend_tag: payload.backend_tag,
+        const result = await deployService.cancelDeployRun({
+          stack: payload.stack,
+          run_id: payload.run_id,
           token: GITHUB_TOKEN
         });
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(result));
       } catch (err) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // POST /api/deploy/trigger - Release Deployment execution
+  if (pathname === '/api/deploy/trigger' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const payload = JSON.parse(body || '{}');
+        const result = await deployService.triggerReleaseDeploy({
+          client: payload.client,
+          frontend_tag: payload.frontend_tag,
+          backend_tag: payload.backend_tag,
+          username: payload.username,
+          password: payload.password,
+          token: GITHUB_TOKEN
+        });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        const status = err.statusCode || 400;
+        res.writeHead(status, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: false, error: err.message }));
       }
     });

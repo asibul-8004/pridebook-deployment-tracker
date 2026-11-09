@@ -1,854 +1,380 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-bs-theme="dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Release Deploy - Pridebook Version Tracker</title>
+  <title>Release Deployment - Pridebook Version Tracker</title>
+  <!-- Bootstrap 5.3 CDN -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" />
   <style>
     :root {
       --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-      --transition-speed: 0.2s;
     }
-
-    [data-theme="dark"] {
-      --bg-page: #0b0f19;
-      --bg-card: #111827;
-      --bg-card-hover: #162032;
-      --bg-card-inner: #0f172a;
-      --bg-header: rgba(11, 15, 25, 0.85);
-      --border-color: #1f2937;
-      --border-color-focus: #3b82f6;
-      --border-card: #1e293b;
-      --text-primary: #f9fafb;
-      --text-secondary: #9ca3af;
-      --text-muted: #6b7280;
-      --brand-primary: #3b82f6;
-      --brand-primary-hover: #2563eb;
-      --brand-primary-subtle: rgba(59, 130, 246, 0.12);
-      --success: #10b981;
-      --success-subtle: rgba(16, 185, 129, 0.12);
-      --success-border: rgba(16, 185, 129, 0.35);
-      --warning: #f59e0b;
-      --warning-subtle: rgba(245, 158, 11, 0.12);
-      --warning-border: rgba(245, 158, 11, 0.35);
-      --danger: #ef4444;
-      --danger-subtle: rgba(239, 68, 68, 0.12);
-      --danger-border: rgba(239, 68, 68, 0.35);
-      --info: #06b6d4;
-      --info-subtle: rgba(6, 182, 212, 0.12);
-      --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.2);
-      --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
-      --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -2px rgba(0, 0, 0, 0.25);
-    }
-
-    [data-theme="light"] {
-      --bg-page: #f8fafc;
-      --bg-card: #ffffff;
-      --bg-card-hover: #f1f5f9;
-      --bg-card-inner: #f8fafc;
-      --bg-header: rgba(255, 255, 255, 0.9);
-      --border-color: #e2e8f0;
-      --border-color-focus: #3b82f6;
-      --border-card: #e2e8f0;
-      --text-primary: #0f172a;
-      --text-secondary: #475569;
-      --text-muted: #94a3b8;
-      --brand-primary: #2563eb;
-      --brand-primary-hover: #1d4ed8;
-      --brand-primary-subtle: rgba(37, 99, 235, 0.08);
-      --success: #059669;
-      --success-subtle: rgba(5, 150, 105, 0.1);
-      --success-border: rgba(5, 150, 105, 0.25);
-      --warning: #d97706;
-      --warning-subtle: rgba(217, 119, 6, 0.1);
-      --warning-border: rgba(217, 119, 6, 0.25);
-      --danger: #dc2626;
-      --danger-subtle: rgba(220, 38, 38, 0.1);
-      --danger-border: rgba(220, 38, 38, 0.25);
-      --info: #0891b2;
-      --info-subtle: rgba(8, 145, 178, 0.1);
-      --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.06);
-      --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -1px rgba(0, 0, 0, 0.04);
-      --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.04);
-    }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-      font-family: var(--font-family);
-    }
-
     body {
-      background-color: var(--bg-page);
-      color: var(--text-primary);
+      font-family: var(--font-family);
+      background-color: #0b0f19;
+      color: #f9fafb;
       min-height: 100vh;
       display: flex;
       flex-direction: column;
-      line-height: 1.5;
-      -webkit-font-smoothing: antialiased;
     }
-
-    header {
+    .header-bar {
       position: sticky;
       top: 0;
-      z-index: 100;
-      background-color: var(--bg-header);
+      z-index: 1020;
+      background: rgba(11, 15, 25, 0.9);
       backdrop-filter: blur(12px);
-      border-bottom: 1px solid var(--border-color);
-      padding: 14px 24px;
+      border-bottom: 1px solid #1f2937;
     }
-
-    .header-inner {
-      max-width: 1300px;
-      margin: 0 auto;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px;
-    }
-
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      text-decoration: none;
-      color: inherit;
-    }
-
     .brand-logo {
       width: 38px;
       height: 38px;
-      background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+      background: linear-gradient(135deg, #2563eb, #8b5cf6);
       border-radius: 10px;
       display: flex;
       align-items: center;
       justify-content: center;
-      color: #fff;
       font-weight: 700;
       font-size: 1.2rem;
-      box-shadow: 0 2px 10px rgba(59, 130, 246, 0.3);
+      box-shadow: 0 2px 10px rgba(37, 99, 235, 0.35);
     }
-
-    .brand-title {
-      font-size: 1.15rem;
-      font-weight: 700;
-      letter-spacing: -0.02em;
-    }
-
-    .brand-sub {
-      font-size: 0.75rem;
-      color: var(--text-secondary);
-    }
-
-    .header-actions {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-
-    .badge-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 4px 10px;
-      border-radius: 9999px;
-      font-size: 0.75rem;
+    .nav-tabs .nav-link {
+      color: #9ca3af;
       font-weight: 600;
-      background-color: var(--brand-primary-subtle);
-      color: var(--brand-primary);
-      border: 1px solid rgba(59, 130, 246, 0.2);
-    }
-
-    .theme-toggle {
-      background: none;
-      border: 1px solid var(--border-color);
-      color: var(--text-secondary);
-      border-radius: 8px;
-      width: 36px;
-      height: 36px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      transition: all var(--transition-speed);
-    }
-
-    .theme-toggle:hover {
-      background-color: var(--bg-card-hover);
-      color: var(--text-primary);
-    }
-
-    main {
-      flex: 1;
-      max-width: 1300px;
-      width: 100%;
-      margin: 0 auto;
-      padding: 24px;
-    }
-
-    /* Tabs */
-    .tabs-wrapper {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      border-bottom: 1px solid var(--border-color);
-      margin-bottom: 24px;
-      gap: 12px;
-      flex-wrap: wrap;
-    }
-
-    .tabs-nav {
-      display: flex;
-      gap: 8px;
-    }
-
-    .tab-btn {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 10px 18px;
-      background: none;
       border: none;
       border-bottom: 2px solid transparent;
-      color: var(--text-secondary);
-      font-size: 0.9rem;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all var(--transition-speed);
-      text-decoration: none;
+      padding: 10px 18px;
+      transition: all 0.2s;
     }
-
-    .tab-btn:hover {
-      color: var(--text-primary);
-      background-color: var(--brand-primary-subtle);
-      border-radius: 8px 8px 0 0;
+    .nav-tabs .nav-link:hover {
+      color: #f9fafb;
+      border-bottom-color: rgba(59, 130, 246, 0.5);
     }
-
-    .tab-btn.active {
-      color: var(--brand-primary);
-      border-bottom-color: var(--brand-primary);
+    .nav-tabs .nav-link.active {
+      color: #3b82f6;
+      background: transparent;
+      border-bottom-color: #3b82f6;
     }
-
-    .tab-badge {
-      font-size: 0.72rem;
-      padding: 2px 7px;
-      border-radius: 9999px;
-      background-color: var(--brand-primary-subtle);
-      color: var(--brand-primary);
-      font-weight: 700;
-    }
-
-    /* Release Control Card */
-    .deploy-panel {
-      background-color: var(--bg-card);
-      border: 1px solid var(--border-card);
+    .card {
+      background-color: #111827;
+      border: 1px solid #1e293b;
       border-radius: 14px;
-      padding: 24px;
-      margin-bottom: 24px;
-      box-shadow: var(--shadow-sm);
     }
-
-    .panel-header {
-      margin-bottom: 20px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      flex-wrap: wrap;
-      gap: 12px;
+    .form-control, .form-select {
+      background-color: #0f172a;
+      border-color: #1f2937;
+      color: #f9fafb;
     }
-
-    .panel-title {
-      font-size: 1.25rem;
-      font-weight: 700;
-      display: flex;
-      align-items: center;
-      gap: 10px;
+    .form-control:focus, .form-select:focus {
+      background-color: #0f172a;
+      border-color: #3b82f6;
+      box-shadow: 0 0 0 0.25rem rgba(59, 130, 246, 0.2);
+      color: #f9fafb;
     }
-
-    .panel-desc {
-      color: var(--text-secondary);
-      font-size: 0.85rem;
-      margin-top: 4px;
-    }
-
-    .deploy-form {
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr auto;
-      gap: 16px;
-      align-items: flex-end;
-    }
-
-    @media (max-width: 900px) {
-      .deploy-form {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    .form-group {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-
-    .form-label {
-      font-size: 0.8rem;
-      font-weight: 600;
-      color: var(--text-secondary);
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-    }
-
-    .form-control {
-      background-color: var(--bg-card-inner);
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      padding: 10px 14px;
-      color: var(--text-primary);
-      font-size: 0.95rem;
-      transition: all var(--transition-speed);
-      width: 100%;
-    }
-
-    .form-control:focus {
-      outline: none;
-      border-color: var(--brand-primary);
-      box-shadow: 0 0 0 3px var(--brand-primary-subtle);
-    }
-
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      padding: 10px 22px;
-      border-radius: 8px;
-      font-size: 0.95rem;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all var(--transition-speed);
-      border: none;
-    }
-
-    .btn-primary {
-      background: linear-gradient(135deg, #2563eb, #3b82f6);
-      color: #fff;
-      box-shadow: 0 2px 8px rgba(37, 99, 235, 0.35);
-    }
-
-    .btn-primary:hover:not(:disabled) {
-      background: linear-gradient(135deg, #1d4ed8, #2563eb);
-      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.45);
-      transform: translateY(-1px);
-    }
-
-    .btn:disabled {
-      opacity: 0.6;
-      cursor: not-allowed;
-      transform: none !important;
-    }
-
-    /* Dual Live Status Cards Grid */
-    .status-cards-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 20px;
-      margin-bottom: 28px;
-    }
-
-    @media (max-width: 800px) {
-      .status-cards-grid {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    .deploy-card {
-      background-color: var(--bg-card);
-      border: 1px solid var(--border-card);
-      border-radius: 14px;
-      padding: 22px;
-      box-shadow: var(--shadow-sm);
-      transition: all var(--transition-speed);
-      position: relative;
-      overflow: hidden;
-    }
-
-    .deploy-card.active {
-      border-color: rgba(59, 130, 246, 0.4);
-      background: linear-gradient(180deg, var(--bg-card), var(--bg-card-hover));
-    }
-
-    .deploy-card.card-success {
-      border-color: var(--success-border);
-    }
-
-    .deploy-card.card-failed {
-      border-color: var(--danger-border);
-    }
-
-    .deploy-card-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 16px;
-    }
-
-    .stack-tag {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 0.95rem;
-      font-weight: 700;
-    }
-
-    .stack-icon {
+    .stack-avatar {
       width: 28px;
       height: 28px;
       border-radius: 7px;
-      display: flex;
+      display: inline-flex;
       align-items: center;
       justify-content: center;
-      font-size: 0.8rem;
       font-weight: 800;
+      font-size: 0.8rem;
     }
-
-    .stack-icon.frontend {
+    .stack-avatar.f {
       background: rgba(59, 130, 246, 0.15);
       color: #60a5fa;
-      border: 1px solid rgba(59, 130, 246, 0.3);
+      border: 1px solid rgba(59, 130, 246, 0.35);
     }
-
-    .stack-icon.backend {
+    .stack-avatar.b {
       background: rgba(168, 85, 247, 0.15);
       color: #c084fc;
-      border: 1px solid rgba(168, 85, 247, 0.3);
+      border: 1px solid rgba(168, 85, 247, 0.35);
     }
-
-    /* Live State Badges */
-    .status-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 5px 12px;
-      border-radius: 9999px;
-      font-size: 0.75rem;
+    .pulse-badge {
+      animation: pulseAnim 1.6s infinite ease-in-out;
+    }
+    @keyframes pulseAnim {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.7; transform: scale(0.98); }
+    }
+    .timer-badge {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
       font-weight: 700;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
+      font-size: 0.9rem;
+      letter-spacing: 0.05em;
     }
-
-    .badge-idle {
-      background-color: rgba(107, 114, 128, 0.15);
-      color: #9ca3af;
-      border: 1px solid rgba(107, 114, 128, 0.3);
-    }
-
-    .badge-queued {
-      background-color: var(--warning-subtle);
-      color: #fbbf24;
-      border: 1px solid var(--warning-border);
-      animation: pulse 1.8s infinite;
-    }
-
-    .badge-deploying {
-      background-color: var(--brand-primary-subtle);
-      color: #60a5fa;
-      border: 1px solid rgba(59, 130, 246, 0.4);
-      animation: pulse 1.5s infinite;
-    }
-
-    .badge-deployed {
-      background-color: var(--success-subtle);
-      color: #34d399;
-      border: 1px solid var(--success-border);
-    }
-
-    .badge-failed {
-      background-color: var(--danger-subtle);
-      color: #f87171;
-      border: 1px solid var(--danger-border);
-    }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.6; }
-    }
-
-    .card-meta-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 12px;
-      font-size: 0.85rem;
-      color: var(--text-secondary);
-    }
-
-    .card-version-val {
-      font-family: monospace;
-      font-size: 1.05rem;
-      font-weight: 700;
-      color: var(--text-primary);
-    }
-
-    .job-step-box {
-      background-color: var(--bg-card-inner);
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      padding: 10px 14px;
-      margin-bottom: 16px;
-      font-size: 0.85rem;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-
-    .job-spinner {
-      width: 16px;
-      height: 16px;
-      border: 2px solid rgba(59, 130, 246, 0.2);
-      border-top-color: #3b82f6;
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-    }
-
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-
-    .progress-bar-container {
-      height: 6px;
-      background-color: var(--bg-card-inner);
-      border-radius: 9999px;
-      overflow: hidden;
-      margin-bottom: 14px;
-    }
-
-    .progress-bar {
-      height: 100%;
-      width: 0%;
-      transition: width 0.4s ease;
-      background: linear-gradient(90deg, #3b82f6, #10b981);
-    }
-
-    .card-footer {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      font-size: 0.78rem;
-      color: var(--text-muted);
-      border-top: 1px solid var(--border-color);
-      padding-top: 12px;
-    }
-
-    .github-link {
-      color: var(--brand-primary);
-      text-decoration: none;
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      font-weight: 600;
-    }
-
-    .github-link:hover {
-      text-decoration: underline;
-    }
-
-    /* History Table */
-    .history-card {
-      background-color: var(--bg-card);
-      border: 1px solid var(--border-card);
-      border-radius: 14px;
-      padding: 22px;
-      box-shadow: var(--shadow-sm);
-    }
-
-    .table-wrapper {
-      overflow-x: auto;
-      margin-top: 16px;
-    }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      text-align: left;
-      font-size: 0.88rem;
-    }
-
-    th {
-      padding: 10px 14px;
-      background-color: var(--bg-card-inner);
-      color: var(--text-secondary);
-      font-weight: 600;
-      border-bottom: 1px solid var(--border-color);
-      font-size: 0.78rem;
-      text-transform: uppercase;
-      letter-spacing: 0.03em;
-    }
-
-    td {
-      padding: 12px 14px;
-      border-bottom: 1px solid var(--border-color);
-    }
-
-    tr:hover td {
-      background-color: var(--bg-card-hover);
-    }
-
-    /* Toast */
-    .toast {
+    .toast-container {
       position: fixed;
       bottom: 24px;
       right: 24px;
-      padding: 12px 20px;
-      border-radius: 10px;
-      background: #111827;
-      color: #fff;
-      font-size: 0.9rem;
-      font-weight: 600;
-      box-shadow: var(--shadow-lg);
-      border: 1px solid var(--border-color);
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      transform: translateY(100px);
-      opacity: 0;
-      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-      z-index: 1000;
-    }
-
-    .toast.show {
-      transform: translateY(0);
-      opacity: 1;
+      z-index: 1090;
     }
   </style>
 </head>
 <body>
 
-  <!-- Top Header -->
-  <header>
-    <div class="header-inner">
-      <a href="/" class="brand">
-        <div class="brand-logo">P</div>
+  <!-- Header Navigation -->
+  <header class="header-bar py-2 px-3 mb-4">
+    <div class="container-xxl d-flex align-items-center justify-content-between">
+      <a href="/" class="d-flex align-items-center gap-3 text-decoration-none text-light">
+        <div class="brand-logo">PB</div>
         <div>
-          <div class="brand-title">Pridebook Version Tracker</div>
-          <div class="brand-sub">Client Deployments &amp; Release Control</div>
+          <div class="fw-bold fs-5 lh-1">Pridebook Version Tracker</div>
+          <small class="text-secondary" style="font-size: 0.75rem;">Client Deployments &amp; Release Control</small>
         </div>
       </a>
-      <div class="header-actions">
-        <span class="badge-pill" id="dbTypeBadge">Connecting...</span>
-        <button class="theme-toggle" id="themeToggleBtn" title="Toggle Theme">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="5"></circle>
-            <line x1="12" y1="1" x2="12" y2="3"></line>
-            <line x1="12" y1="21" x2="12" y2="23"></line>
-            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-            <line x1="1" y1="12" x2="3" y2="12"></line>
-            <line x1="21" y1="12" x2="23" y2="12"></line>
-            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-          </svg>
-        </button>
+      <div class="d-flex align-items-center gap-2">
+        <span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle rounded-pill py-2 px-3" id="dbTypeBadge">
+          <i class="bi bi-database me-1"></i> DB: Connecting...
+        </span>
+        <a href="/" class="btn btn-sm btn-outline-secondary rounded-pill px-3">
+          <i class="bi bi-arrow-left me-1"></i> Dashboard
+        </a>
       </div>
     </div>
   </header>
 
   <!-- Main Container -->
-  <main>
-    <!-- Navigation Tabs -->
-    <div class="tabs-wrapper">
-      <div class="tabs-nav">
-        <a href="/" class="tab-btn">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="8" y1="6" x2="21" y2="6"></line>
-            <line x1="8" y1="12" x2="21" y2="12"></line>
-            <line x1="8" y1="18" x2="21" y2="18"></line>
-            <line x1="3" y1="6" x2="3.01" y2="6"></line>
-            <line x1="3" y1="12" x2="3.01" y2="12"></line>
-            <line x1="3" y1="18" x2="3.01" y2="18"></line>
-          </svg>
-          <span>All Clients (Latest Version)</span>
+  <main class="container-xxl flex-grow-1 pb-5">
+    <!-- Tabs Nav -->
+    <ul class="nav nav-tabs mb-4">
+      <li class="nav-item">
+        <a class="nav-link" href="/">
+          <i class="bi bi-list-task me-1"></i> All Clients (Latest Version)
         </a>
-
-        <a href="/?tab=tab2" class="tab-btn">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="10"></circle>
-            <polyline points="12 6 12 12 16 14"></polyline>
-          </svg>
-          <span>Stage deployment history</span>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" href="/?tab=tab2">
+          <i class="bi bi-clock-history me-1"></i> Stage deployment history
         </a>
-
-        <a href="/release" class="tab-btn active">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
-          </svg>
-          <span>Release</span>
-          <span class="tab-badge" style="background: rgba(59, 130, 246, 0.25); color: #60a5fa;">Deploy 🚀</span>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link active" href="/release">
+          <i class="bi bi-rocket-takeoff-fill me-1 text-primary"></i> Release Deployment
+          <span class="badge bg-primary-subtle text-primary rounded-pill ms-1">Active</span>
         </a>
-      </div>
+      </li>
+    </ul>
 
-      <div style="display: flex; gap: 8px;">
-        <button class="btn" style="font-size: 0.8rem; padding: 6px 12px; background: var(--bg-card); border: 1px solid var(--border-color); color: var(--text-secondary);" onclick="fetchTags()">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="23 4 23 10 17 10"></polyline>
-            <polyline points="1 20 1 14 7 14"></polyline>
-            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-          </svg>
-          <span>Refresh Tags</span>
-        </button>
+    <!-- Deployability Warning / Error Banner -->
+    <div class="alert alert-danger d-none shadow-sm" id="deployabilityAlert" role="alert">
+      <div class="d-flex align-items-center">
+        <i class="bi bi-exclamation-triangle-fill fs-4 me-3"></i>
+        <div id="deployabilityAlertText"></div>
       </div>
     </div>
 
-    <!-- Deploy Control Panel -->
-    <div class="deploy-panel">
-      <div class="panel-header">
+    <!-- Release Deployment Control Card -->
+    <div class="card mb-4 shadow-sm">
+      <div class="card-header bg-transparent py-3 border-secondary-subtle d-flex align-items-center justify-content-between flex-wrap gap-2">
         <div>
-          <div class="panel-title">
-            <span>🚀</span>
-            <span>Trigger Dual Release Deployment</span>
-          </div>
-          <div class="panel-desc">
-            Select the target client box, specify frontend and backend release tags, and trigger both <code>release-deploy.yml</code> workflows simultaneously.
-          </div>
+          <h5 class="card-title mb-1 fw-bold text-light">
+            <i class="bi bi-rocket-takeoff me-2 text-primary"></i> Release Deployment
+          </h5>
+          <p class="card-subtitle text-secondary small mb-0">
+            Trigger release deployments for Frontend, Backend, or both. Non-stage boxes validate deployability status automatically.
+          </p>
         </div>
-      </div>
-
-      <form class="deploy-form" id="deployForm" onsubmit="event.preventDefault(); triggerDeploy();">
-        <div class="form-group">
-          <label class="form-label">Client Name</label>
-          <select class="form-control" id="targetClient" required onchange="handleClientChange()">
-            <option value="stage">stage</option>
-            <option value="shinshin">shinshin</option>
-            <option value="karupannya">karupannya</option>
-            <option value="bengal">bengal</option>
-            <option value="ananta-uat">ananta-uat</option>
-            <option value="ananta-live">ananta-live</option>
-          </select>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label">Frontend Version</label>
-          <input type="text" class="form-control" id="frontendVersion" placeholder="e.g. v1.42.0" list="frontendTagsList" required pattern="^v[0-9]+\.[0-9]+\.[0-9]+$" title="Must match strict vX.Y.Z (e.g. v1.42.0)" />
-          <datalist id="frontendTagsList"></datalist>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label">Backend Version</label>
-          <input type="text" class="form-control" id="backendVersion" placeholder="e.g. v2.10.2" list="backendTagsList" required pattern="^v[0-9]+\.[0-9]+\.[0-9]+$" title="Must match strict vX.Y.Z (e.g. v2.10.2)" />
-          <datalist id="backendTagsList"></datalist>
-        </div>
-
-        <div class="form-group">
-          <button type="submit" class="btn btn-primary" id="deploySubmitBtn">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
-            </svg>
-            <span id="deployBtnText">Deploy Release</span>
+        <div>
+          <button class="btn btn-sm btn-outline-secondary rounded-pill px-3" onclick="fetchTags()">
+            <i class="bi bi-arrow-clockwise me-1"></i> Refresh Tags
           </button>
         </div>
-      </form>
-    </div>
-
-    <!-- Two Live Status Cards -->
-    <div class="status-cards-grid">
-      <!-- Card 1: Frontend Deployment -->
-      <div class="deploy-card" id="frontendCard">
-        <div class="deploy-card-header">
-          <div class="stack-tag">
-            <span class="stack-icon frontend">F</span>
-            <span>Frontend Deployment</span>
-          </div>
-          <span class="status-badge badge-idle" id="frontendBadge">IDLE</span>
-        </div>
-
-        <div class="card-meta-row">
-          <span>Target Client: <strong id="frontendClientTxt">-</strong></span>
-          <span>Version: <span class="card-version-val" id="frontendVersionTxt">-</span></span>
-        </div>
-
-        <div class="job-step-box">
-          <div class="job-spinner" id="frontendSpinner" style="display: none;"></div>
-          <span id="frontendJobTxt">Waiting for deploy trigger...</span>
-        </div>
-
-        <div class="progress-bar-container">
-          <div class="progress-bar" id="frontendProgress"></div>
-        </div>
-
-        <div class="card-footer">
-          <span id="frontendTimerTxt">Elapsed: -</span>
-          <a href="#" target="_blank" class="github-link" id="frontendRunLink" style="display: none;">
-            <span>View Run</span>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
-              <polyline points="15 3 21 3 21 9"></polyline>
-              <line x1="10" y1="14" x2="21" y2="3"></line>
-            </svg>
-          </a>
-        </div>
       </div>
 
-      <!-- Card 2: Backend Deployment -->
-      <div class="deploy-card" id="backendCard">
-        <div class="deploy-card-header">
-          <div class="stack-tag">
-            <span class="stack-icon backend">B</span>
-            <span>Backend (API) Deployment</span>
+      <div class="card-body py-4">
+        <form id="releaseForm" onsubmit="event.preventDefault(); onDeployClick();">
+          <div class="row g-3 align-items-end">
+            <!-- Client Box Select -->
+            <div class="col-md-3">
+              <label class="form-label text-secondary small fw-bold text-uppercase">Client Name</label>
+              <select class="form-select" id="targetClient" required onchange="onInputsChanged()">
+                <option value="stage">stage</option>
+                <option value="shinshin">shinshin</option>
+                <option value="karupannya">karupannya</option>
+                <option value="bengal">bengal</option>
+                <option value="ananta-uat">ananta-uat</option>
+                <option value="ananta-live">ananta-live</option>
+              </select>
+            </div>
+
+            <!-- Frontend Version Input -->
+            <div class="col-md-3">
+              <label class="form-label text-secondary small fw-bold text-uppercase d-flex justify-content-between">
+                <span>Frontend Version</span>
+                <span class="text-muted" style="font-size: 0.72rem;">Optional if Backend set</span>
+              </label>
+              <div class="input-group">
+                <span class="input-group-text bg-dark-subtle border-secondary-subtle text-primary fw-bold">F</span>
+                <input
+                  type="text"
+                  class="form-control"
+                  id="frontendVersion"
+                  placeholder="e.g. v1.42.0"
+                  list="frontendTagsList"
+                  pattern="^v[0-9]+\.[0-9]+\.[0-9]+$"
+                  title="Format: vX.Y.Z (e.g. v1.42.0)"
+                  oninput="onInputsChanged()"
+                />
+                <datalist id="frontendTagsList"></datalist>
+              </div>
+            </div>
+
+            <!-- Backend Version Input -->
+            <div class="col-md-3">
+              <label class="form-label text-secondary small fw-bold text-uppercase d-flex justify-content-between">
+                <span>Backend Version</span>
+                <span class="text-muted" style="font-size: 0.72rem;">Optional if Frontend set</span>
+              </label>
+              <div class="input-group">
+                <span class="input-group-text bg-dark-subtle border-secondary-subtle text-info fw-bold">B</span>
+                <input
+                  type="text"
+                  class="form-control"
+                  id="backendVersion"
+                  placeholder="e.g. v2.10.2"
+                  list="backendTagsList"
+                  pattern="^v[0-9]+\.[0-9]+\.[0-9]+$"
+                  title="Format: vX.Y.Z (e.g. v2.10.2)"
+                  oninput="onInputsChanged()"
+                />
+                <datalist id="backendTagsList"></datalist>
+              </div>
+            </div>
+
+            <!-- Action Button -->
+            <div class="col-md-3 d-grid">
+              <button type="submit" class="btn btn-primary fw-bold py-2 shadow-sm" id="deploySubmitBtn">
+                <i class="bi bi-send-fill me-2" id="deployBtnIcon"></i>
+                <span id="deployBtnText">Release Deployment</span>
+              </button>
+            </div>
           </div>
-          <span class="status-badge badge-idle" id="backendBadge">IDLE</span>
-        </div>
-
-        <div class="card-meta-row">
-          <span>Target Client: <strong id="backendClientTxt">-</strong></span>
-          <span>Version: <span class="card-version-val" id="backendVersionTxt">-</span></span>
-        </div>
-
-        <div class="job-step-box">
-          <div class="job-spinner" id="backendSpinner" style="display: none;"></div>
-          <span id="backendJobTxt">Waiting for deploy trigger...</span>
-        </div>
-
-        <div class="progress-bar-container">
-          <div class="progress-bar" id="backendProgress"></div>
-        </div>
-
-        <div class="card-footer">
-          <span id="backendTimerTxt">Elapsed: -</span>
-          <a href="#" target="_blank" class="github-link" id="backendRunLink" style="display: none;">
-            <span>View Run</span>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
-              <polyline points="15 3 21 3 21 9"></polyline>
-              <line x1="10" y1="14" x2="21" y2="3"></line>
-            </svg>
-          </a>
-        </div>
+        </form>
       </div>
     </div>
 
-    <!-- Recent Release Runs Table -->
-    <div class="history-card">
-      <div class="panel-header" style="margin-bottom: 10px;">
-        <div class="panel-title" style="font-size: 1.05rem;">
-          <span>📋</span>
-          <span>Recent GitHub Release Deploy Runs</span>
+    <!-- Dual Live Status Cards Grid -->
+    <div class="row g-4 mb-4" id="statusCardsRow">
+      <!-- Card 1: Frontend Deployment Card -->
+      <div class="col-md-6" id="frontendCol">
+        <div class="card h-100 shadow-sm border-secondary-subtle" id="frontendCard">
+          <div class="card-header bg-transparent py-3 border-secondary-subtle d-flex align-items-center justify-content-between">
+            <div class="d-flex align-items-center gap-2">
+              <span class="stack-avatar f">F</span>
+              <span class="fw-bold text-light">Frontend Deployment</span>
+            </div>
+            <span class="badge bg-secondary-subtle text-secondary rounded-pill px-3 py-2" id="frontendBadge">IDLE</span>
+          </div>
+
+          <div class="card-body">
+            <div class="d-flex align-items-center justify-content-between mb-3 text-secondary small">
+              <span>Target: <strong class="text-light text-uppercase" id="frontendClientTxt">-</strong></span>
+              <span>Version: <strong class="text-primary font-monospace fs-6" id="frontendVersionTxt">-</strong></span>
+            </div>
+
+            <!-- Current Step Alert Box -->
+            <div class="p-3 rounded-3 bg-dark-subtle border border-secondary-subtle mb-3 d-flex align-items-center gap-2">
+              <div class="spinner-border spinner-border-sm text-primary d-none" id="frontendSpinner" role="status"></div>
+              <span class="small text-light" id="frontendJobTxt">Awaiting deployment trigger...</span>
+            </div>
+
+            <!-- Animated Progress Bar -->
+            <div class="progress mb-3" style="height: 6px;">
+              <div class="progress-bar progress-bar-striped progress-bar-animated bg-primary" id="frontendProgress" style="width: 0%"></div>
+            </div>
+
+            <div class="d-flex align-items-center justify-content-between text-secondary small pt-2 border-top border-secondary-subtle">
+              <div>
+                <i class="bi bi-stopwatch me-1 text-primary"></i>
+                <span class="timer-badge text-light" id="frontendTimerTxt">00:00:00</span>
+              </div>
+              <a href="#" target="_blank" class="text-decoration-none text-primary fw-semibold d-none" id="frontendRunLink">
+                View Run <i class="bi bi-box-arrow-up-right ms-1"></i>
+              </a>
+            </div>
+          </div>
+
+          <div class="card-footer bg-transparent py-2 border-secondary-subtle d-flex justify-content-end" id="frontendFooter">
+            <button class="btn btn-sm btn-outline-danger d-none" id="frontendCancelBtn" onclick="cancelRun('frontend')">
+              <i class="bi bi-x-circle me-1"></i> Cancel Run
+            </button>
+          </div>
         </div>
       </div>
-      <div class="table-wrapper">
-        <table>
-          <thead>
+
+      <!-- Card 2: Backend (API) Deployment Card -->
+      <div class="col-md-6" id="backendCol">
+        <div class="card h-100 shadow-sm border-secondary-subtle" id="backendCard">
+          <div class="card-header bg-transparent py-3 border-secondary-subtle d-flex align-items-center justify-content-between">
+            <div class="d-flex align-items-center gap-2">
+              <span class="stack-avatar b">B</span>
+              <span class="fw-bold text-light">Backend (API) Deployment</span>
+            </div>
+            <span class="badge bg-secondary-subtle text-secondary rounded-pill px-3 py-2" id="backendBadge">IDLE</span>
+          </div>
+
+          <div class="card-body">
+            <div class="d-flex align-items-center justify-content-between mb-3 text-secondary small">
+              <span>Target: <strong class="text-light text-uppercase" id="backendClientTxt">-</strong></span>
+              <span>Version: <strong class="text-info font-monospace fs-6" id="backendVersionTxt">-</strong></span>
+            </div>
+
+            <!-- Current Step Alert Box -->
+            <div class="p-3 rounded-3 bg-dark-subtle border border-secondary-subtle mb-3 d-flex align-items-center gap-2">
+              <div class="spinner-border spinner-border-sm text-info d-none" id="backendSpinner" role="status"></div>
+              <span class="small text-light" id="backendJobTxt">Awaiting deployment trigger...</span>
+            </div>
+
+            <!-- Animated Progress Bar -->
+            <div class="progress mb-3" style="height: 6px;">
+              <div class="progress-bar progress-bar-striped progress-bar-animated bg-info" id="backendProgress" style="width: 0%"></div>
+            </div>
+
+            <div class="d-flex align-items-center justify-content-between text-secondary small pt-2 border-top border-secondary-subtle">
+              <div>
+                <i class="bi bi-stopwatch me-1 text-info"></i>
+                <span class="timer-badge text-light" id="backendTimerTxt">00:00:00</span>
+              </div>
+              <a href="#" target="_blank" class="text-decoration-none text-info fw-semibold d-none" id="backendRunLink">
+                View Run <i class="bi bi-box-arrow-up-right ms-1"></i>
+              </a>
+            </div>
+          </div>
+
+          <div class="card-footer bg-transparent py-2 border-secondary-subtle d-flex justify-content-end" id="backendFooter">
+            <button class="btn btn-sm btn-outline-danger d-none" id="backendCancelBtn" onclick="cancelRun('backend')">
+              <i class="bi bi-x-circle me-1"></i> Cancel Run
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Recent GitHub Release Deploy Runs Table -->
+    <div class="card shadow-sm">
+      <div class="card-header bg-transparent py-3 border-secondary-subtle d-flex align-items-center justify-content-between">
+        <h6 class="card-title mb-0 fw-bold text-light">
+          <i class="bi bi-journal-code me-2 text-primary"></i> Recent GitHub Release Deploy Runs
+        </h6>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0" style="font-size: 0.88rem;">
+          <thead class="table-dark text-secondary text-uppercase" style="font-size: 0.78rem;">
             <tr>
-              <th>Stack</th>
-              <th>Client Box</th>
-              <th>Workflow Name</th>
-              <th>Status</th>
-              <th>Triggered By</th>
-              <th>Created At</th>
+              <th scope="col" style="padding-left: 1.25rem;">Stack</th>
+              <th scope="col">Client Box</th>
+              <th scope="col">Workflow Run</th>
+              <th scope="col">Status</th>
+              <th scope="col">Triggered By</th>
+              <th scope="col" style="padding-right: 1.25rem;">Created At</th>
             </tr>
           </thead>
           <tbody id="recentRunsBody">
             <tr>
-              <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 20px;">Loading recent runs...</td>
+              <td colspan="6" class="text-center py-4 text-muted">Loading recent runs...</td>
             </tr>
           </tbody>
         </table>
@@ -856,50 +382,105 @@
     </div>
   </main>
 
-  <!-- Toast Notification -->
-  <div class="toast" id="toast"></div>
+  <!-- Pride Login Modal -->
+  <div class="modal fade" id="prideLoginModal" tabindex="-1" aria-labelledby="prideLoginModalLabel" aria-hidden="true" data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content bg-dark border-secondary-subtle shadow-lg">
+        <div class="modal-header border-secondary-subtle">
+          <h5 class="modal-title fw-bold text-light" id="prideLoginModalLabel">
+            <i class="bi bi-shield-lock-fill text-primary me-2"></i> Pride Login
+          </h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <form id="loginForm" onsubmit="event.preventDefault(); submitLoginAndDeploy();">
+          <div class="modal-body py-4">
+            <div class="alert alert-danger d-none mb-3 py-2 small" id="loginAlert"></div>
+            <div class="mb-3">
+              <label class="form-label text-secondary small fw-bold">Username</label>
+              <div class="input-group">
+                <span class="input-group-text bg-dark-subtle border-secondary-subtle text-secondary"><i class="bi bi-person-fill"></i></span>
+                <input type="text" class="form-control" id="loginUser" autocomplete="username" placeholder="Enter username" required />
+              </div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label text-secondary small fw-bold">Password</label>
+              <div class="input-group">
+                <span class="input-group-text bg-dark-subtle border-secondary-subtle text-secondary"><i class="bi bi-key-fill"></i></span>
+                <input type="password" class="form-control" id="loginPass" autocomplete="current-password" placeholder="Enter password" required />
+              </div>
+            </div>
+            <p class="text-secondary small mb-0">
+              <i class="bi bi-info-circle me-1"></i> Authorized deployment credentials are required to dispatch GitHub Actions release workflows.
+            </p>
+          </div>
+          <div class="modal-footer border-secondary-subtle">
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="submit" class="btn btn-primary fw-bold px-4" id="loginSubmitBtn">
+              <i class="bi bi-check2-circle me-1"></i> Authenticate &amp; Deploy
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-container">
+    <div id="liveToast" class="toast align-items-center text-bg-dark border-secondary-subtle shadow" role="alert" aria-live="assertive" aria-atomic="true">
+      <div class="d-flex">
+        <div class="toast-body fw-semibold" id="toastMessage"></div>
+        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bootstrap 5.3 Bundle JS -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 
   <script>
-    // State
+    // State management
     let activePollTimer = null;
-    let elapsedTimer = null;
+    let timerInterval = null;
     let deployStartTime = 0;
-    let currentDeployClient = '';
+    let cardTimers = {
+      frontend: { finished: false, total: '00:00:00' },
+      backend: { finished: false, total: '00:00:00' }
+    };
+
+    let currentClient = '';
     let currentFrontendTag = '';
     let currentBackendTag = '';
+    let currentActiveRunIds = { frontend: null, backend: null };
 
-    // Initialize
+    // Stored credentials in memory
+    let cachedAuth = {
+      username: sessionStorage.getItem('pride_deploy_user') || 'pridebook',
+      password: sessionStorage.getItem('pride_deploy_pass') || ''
+    };
+
+    let bsLoginModal = null;
+    let bsToast = null;
+
     document.addEventListener('DOMContentLoaded', () => {
-      initTheme();
+      bsLoginModal = new bootstrap.Modal(document.getElementById('prideLoginModal'));
+      bsToast = new bootstrap.Toast(document.getElementById('liveToast'), { delay: 4500 });
+
       loadConfig();
       fetchTags();
       fetchRecentRuns();
+      onInputsChanged();
     });
 
-    // Theme Toggle
-    function initTheme() {
-      const savedTheme = localStorage.getItem('pridebook-theme') || 'dark';
-      document.documentElement.setAttribute('data-theme', savedTheme);
-      document.getElementById('themeToggleBtn').addEventListener('click', () => {
-        const cur = document.documentElement.getAttribute('data-theme');
-        const next = cur === 'dark' ? 'light' : 'dark';
-        document.documentElement.setAttribute('data-theme', next);
-        localStorage.setItem('pridebook-theme', next);
-      });
-    }
-
-    // Load Config
     async function loadConfig() {
       try {
         const res = await fetch('/api/config');
         if (res.ok) {
           const cfg = await res.json();
-          document.getElementById('dbTypeBadge').textContent = 'DB: ' + (cfg.dbType || 'Connected');
+          document.getElementById('dbTypeBadge').innerHTML = `<i class="bi bi-database me-1"></i> DB: ${cfg.dbType || 'Connected'}`;
         }
       } catch (_) {}
     }
 
-    // Fetch Tags
     async function fetchTags() {
       try {
         const res = await fetch('/api/deploy/tags');
@@ -927,127 +508,276 @@
       }
     }
 
-    // Client change handler
-    function handleClientChange() {
+    function onInputsChanged() {
       const client = document.getElementById('targetClient').value;
+      const fVal = document.getElementById('frontendVersion').value.trim();
+      const bVal = document.getElementById('backendVersion').value.trim();
+
       document.getElementById('frontendClientTxt').textContent = client;
       document.getElementById('backendClientTxt').textContent = client;
+      document.getElementById('frontendVersionTxt').textContent = fVal || '-';
+      document.getElementById('backendVersionTxt').textContent = bVal || '-';
+
+      // Clear alert
+      hideDeployabilityAlert();
+
+      // Real-time deployability check if non-stage
+      if (client !== 'stage' && (fVal || bVal)) {
+        checkDeployabilityRealtime(client, fVal, bVal);
+      }
     }
 
-    // Trigger Deploy
-    async function triggerDeploy() {
-      const client = document.getElementById('targetClient').value;
-      const frontendTag = document.getElementById('frontendVersion').value.trim();
-      const backendTag = document.getElementById('backendVersion').value.trim();
+    async function checkDeployabilityRealtime(client, fTag, bTag) {
+      try {
+        const url = `/api/deploy/validate?client=${encodeURIComponent(client)}&frontend_tag=${encodeURIComponent(fTag)}&backend_tag=${encodeURIComponent(bTag)}`;
+        const res = await fetch(url);
+        if (res.ok) {
+          const data = await res.json();
+          const warnings = [];
+          if (fTag && data.frontend && !data.frontend.deployable) {
+            warnings.push(data.frontend.message);
+          }
+          if (bTag && data.backend && !data.backend.deployable) {
+            warnings.push(data.backend.message);
+          }
+          if (warnings.length > 0) {
+            showDeployabilityAlert(warnings.join('<br>'));
+          } else {
+            hideDeployabilityAlert();
+          }
+        }
+      } catch (_) {}
+    }
 
-      if (!client || !frontendTag || !backendTag) {
-        showToast('Please fill all fields', true);
+    function showDeployabilityAlert(html) {
+      const el = document.getElementById('deployabilityAlert');
+      document.getElementById('deployabilityAlertText').innerHTML = html;
+      el.classList.remove('d-none');
+    }
+
+    function hideDeployabilityAlert() {
+      const el = document.getElementById('deployabilityAlert');
+      el.classList.add('d-none');
+      document.getElementById('deployabilityAlertText').innerHTML = '';
+    }
+
+    // Step 1: On Deploy Click -> Validate inputs and open Pride Login modal
+    function onDeployClick() {
+      const client = document.getElementById('targetClient').value.trim();
+      const fTag = document.getElementById('frontendVersion').value.trim();
+      const bTag = document.getElementById('backendVersion').value.trim();
+
+      // Selective Execution Validation: At least one must be present
+      if (!fTag && !bTag) {
+        showToast('Please specify at least a Frontend Version or a Backend Version.', true);
         return;
       }
 
-      const confirmed = confirm(`Are you sure you want to deploy to ${client.toUpperCase()}?\n\nFrontend: ${frontendTag}\nBackend: ${backendTag}`);
-      if (!confirmed) return;
+      currentClient = client;
+      currentFrontendTag = fTag;
+      currentBackendTag = bTag;
 
-      currentDeployClient = client;
-      currentFrontendTag = frontendTag;
-      currentBackendTag = backendTag;
+      // Always open Pride Login Modal
+      document.getElementById('loginAlert').classList.add('d-none');
+      document.getElementById('loginUser').value = cachedAuth.username || 'pridebook';
+      document.getElementById('loginPass').value = cachedAuth.password || '';
+      bsLoginModal.show();
+    }
 
+    // Step 2: Modal Submit -> Verify credentials & Execute
+    async function submitLoginAndDeploy() {
+      const user = document.getElementById('loginUser').value.trim();
+      const pass = document.getElementById('loginPass').value.trim();
+      const loginAlert = document.getElementById('loginAlert');
+      const submitBtn = document.getElementById('loginSubmitBtn');
+
+      if (!user || !pass) {
+        loginAlert.textContent = 'Please enter both username and password.';
+        loginAlert.classList.remove('d-none');
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Verifying...';
+
+      try {
+        const authRes = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: user, password: pass })
+        });
+
+        const authData = await authRes.json();
+        if (!authRes.ok || !authData.success) {
+          throw new Error(authData.error || 'Invalid credentials');
+        }
+
+        // Cache valid credentials for session
+        cachedAuth.username = user;
+        cachedAuth.password = pass;
+        sessionStorage.setItem('pride_deploy_user', user);
+        sessionStorage.setItem('pride_deploy_pass', pass);
+
+        bsLoginModal.hide();
+        executeDeployment(user, pass);
+      } catch (err) {
+        loginAlert.textContent = err.message;
+        loginAlert.classList.remove('d-none');
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '<i class="bi bi-check2-circle me-1"></i> Authenticate &amp; Deploy';
+      }
+    }
+
+    // Step 3: Trigger Deployment
+    async function executeDeployment(user, pass) {
       const submitBtn = document.getElementById('deploySubmitBtn');
       submitBtn.disabled = true;
-      document.getElementById('deployBtnText').textContent = 'Dispatching...';
+      document.getElementById('deployBtnIcon').className = 'spinner-border spinner-border-sm me-2';
+      document.getElementById('deployBtnText').textContent = 'Deploying...';
 
-      // Set Cards to Queued State immediately
-      setCardState('frontend', 'queued', {
-        client,
-        tag: frontendTag,
-        job: 'Dispatched to GitHub Actions queue...',
-        progress: 15
-      });
-      setCardState('backend', 'queued', {
-        client,
-        tag: backendTag,
-        job: 'Dispatched to GitHub Actions queue...',
-        progress: 15
-      });
+      cardTimers = {
+        frontend: { finished: !currentFrontendTag, total: '00:00:00' },
+        backend: { finished: !currentBackendTag, total: '00:00:00' }
+      };
+
+      // Setup Cards based on Selective Execution
+      if (currentFrontendTag) {
+        setCardState('frontend', 'queued', {
+          client: currentClient,
+          tag: currentFrontendTag,
+          job: 'Dispatched to GitHub Actions queue...',
+          progress: 15
+        });
+      } else {
+        setCardState('frontend', 'idle', { client: currentClient, tag: 'Skipped (No version specified)', job: 'Not selected for deployment' });
+        document.getElementById('frontendTimerTxt').textContent = '00:00:00';
+      }
+
+      if (currentBackendTag) {
+        setCardState('backend', 'queued', {
+          client: currentClient,
+          tag: currentBackendTag,
+          job: 'Dispatched to GitHub Actions queue...',
+          progress: 15
+        });
+      } else {
+        setCardState('backend', 'idle', { client: currentClient, tag: 'Skipped (No version specified)', job: 'Not selected for deployment' });
+        document.getElementById('backendTimerTxt').textContent = '00:00:00';
+      }
 
       deployStartTime = Date.now();
-      startElapsedTimer();
+      startActiveCountUpTimer();
 
       try {
         const res = await fetch('/api/deploy/trigger', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            client,
-            frontend_tag: frontendTag,
-            backend_tag: backendTag
+            client: currentClient,
+            frontend_tag: currentFrontendTag,
+            backend_tag: currentBackendTag,
+            username: user,
+            password: pass
           })
         });
 
         const data = await res.json();
         if (!res.ok || !data.success) {
-          throw new Error(data.error || 'Failed to dispatch workflow');
+          throw new Error(data.error || 'Failed to dispatch deployment');
         }
 
-        showToast(`Deployments successfully dispatched to ${client}!`);
-        document.getElementById('deployBtnText').textContent = 'Deploying...';
+        if (data.warnings && data.warnings.length > 0) {
+          showDeployabilityAlert(data.warnings.join('<br>'));
+          // Mixed version handling: if one component was blocked, mark its card blocked
+          if (!data.frontend && currentFrontendTag) {
+            setCardState('frontend', 'failed', {
+              tag: currentFrontendTag,
+              job: 'Deployment blocked: Flagged as non-deployable to client',
+              progress: 0
+            });
+            cardTimers.frontend.finished = true;
+            document.getElementById('frontendTimerTxt').textContent = 'Blocked';
+          }
+          if (!data.backend && currentBackendTag) {
+            setCardState('backend', 'failed', {
+              tag: currentBackendTag,
+              job: 'Deployment blocked: Flagged as non-deployable to client',
+              progress: 0
+            });
+            cardTimers.backend.finished = true;
+            document.getElementById('backendTimerTxt').textContent = 'Blocked';
+          }
+        }
 
-        // Start polling status
+        showToast(`Release Deployment initiated for ${currentClient.toUpperCase()}!`);
         startStatusPolling();
       } catch (err) {
         showToast(err.message, true);
-        setCardState('frontend', 'failed', { job: err.message, progress: 100 });
-        setCardState('backend', 'failed', { job: err.message, progress: 100 });
+        showDeployabilityAlert(err.message);
+        if (currentFrontendTag) setCardState('frontend', 'failed', { job: err.message, progress: 100 });
+        if (currentBackendTag) setCardState('backend', 'failed', { job: err.message, progress: 100 });
+        stopAndLockTimer();
         resetDeployButton();
       }
     }
 
-    // Start Polling Status
+    // Step 4: Live Status Polling
     function startStatusPolling() {
       if (activePollTimer) clearInterval(activePollTimer);
 
-      let consecutiveChecks = 0;
       activePollTimer = setInterval(async () => {
-        consecutiveChecks++;
         try {
-          const url = `/api/deploy/status?client=${encodeURIComponent(currentDeployClient)}&frontend_tag=${encodeURIComponent(currentFrontendTag)}&backend_tag=${encodeURIComponent(currentBackendTag)}`;
+          const url = `/api/deploy/status?client=${encodeURIComponent(currentClient)}&frontend_tag=${encodeURIComponent(currentFrontendTag)}&backend_tag=${encodeURIComponent(currentBackendTag)}`;
           const res = await fetch(url);
           if (!res.ok) return;
           const data = await res.json();
 
-          const fStatus = data.frontend?.status || 'queued';
-          const bStatus = data.backend?.status || 'queued';
+          if (currentFrontendTag && data.frontend && !cardTimers.frontend.finished) {
+            updateCardWithLiveInfo('frontend', data.frontend, currentClient, currentFrontendTag);
+          }
+          if (currentBackendTag && data.backend && !cardTimers.backend.finished) {
+            updateCardWithLiveInfo('backend', data.backend, currentClient, currentBackendTag);
+          }
 
-          updateCardWithLiveInfo('frontend', data.frontend, currentDeployClient, currentFrontendTag);
-          updateCardWithLiveInfo('backend', data.backend, currentDeployClient, currentBackendTag);
+          // Evaluate completion
+          const fStatus = currentFrontendTag ? (data.frontend?.status || 'queued') : 'deployed';
+          const bStatus = currentBackendTag ? (data.backend?.status || 'queued') : 'deployed';
 
-          // Check if both completed
-          const fDone = fStatus === 'deployed' || fStatus === 'failed';
-          const bDone = bStatus === 'deployed' || bStatus === 'failed';
+          const isFDone = fStatus === 'deployed' || fStatus === 'failed' || fStatus === 'cancelled';
+          const isBDone = bStatus === 'deployed' || bStatus === 'failed' || bStatus === 'cancelled';
 
-          if (fDone && bDone) {
+          // Lock individual timer when a stack completes
+          if (isFDone && !cardTimers.frontend.finished) {
+            cardTimers.frontend.finished = true;
+            if (currentFrontendTag) {
+              document.getElementById('frontendTimerTxt').textContent = `Total: ${cardTimers.frontend.total || '00:00:00'}`;
+            }
+          }
+          if (isBDone && !cardTimers.backend.finished) {
+            cardTimers.backend.finished = true;
+            if (currentBackendTag) {
+              document.getElementById('backendTimerTxt').textContent = `Total: ${cardTimers.backend.total || '00:00:00'}`;
+            }
+          }
+
+          if (isFDone && isBDone) {
             clearInterval(activePollTimer);
-            clearInterval(elapsedTimer);
+            if (timerInterval) clearInterval(timerInterval);
             resetDeployButton();
             fetchRecentRuns();
 
             if (fStatus === 'deployed' && bStatus === 'deployed') {
-              showToast('Both Frontend and Backend successfully deployed!');
-              // Trigger sync with DB in background
+              showToast('Release deployment completed successfully!');
               fetch('/api/deployments?sync=true').catch(() => {});
+            } else if (fStatus === 'cancelled' || bStatus === 'cancelled') {
+              showToast('Deployment run was cancelled.', true);
             } else {
               showToast('Deployment finished with failures. Check GitHub run logs.', true);
             }
           }
-
-          // Safety timeout after 30 minutes
-          if (consecutiveChecks > 450) {
-            clearInterval(activePollTimer);
-            clearInterval(elapsedTimer);
-            resetDeployButton();
-          }
         } catch (e) {
-          console.warn('Status poll err:', e);
+          console.warn('Status poll warn:', e);
         }
       }, 4000);
     }
@@ -1058,18 +788,23 @@
       let progress = 20;
       let jobText = info.active_job || 'Processing...';
 
+      if (info.run_id) currentActiveRunIds[stack] = info.run_id;
+
       if (status === 'queued') {
         progress = 25;
         jobText = 'Waiting in runner queue...';
       } else if (status === 'deploying') {
         progress = 65;
-        jobText = info.active_job || 'Running deployment containers...';
+        jobText = info.active_job || 'Executing deployment containers...';
       } else if (status === 'deployed') {
         progress = 100;
         jobText = 'Completed successfully (All jobs passed)';
       } else if (status === 'failed') {
         progress = 100;
-        jobText = 'Failed: Check workflow logs';
+        jobText = 'Deployment failed. Check workflow logs.';
+      } else if (status === 'cancelled') {
+        progress = 100;
+        jobText = 'Deployment cancelled by user.';
       }
 
       setCardState(stack, status, {
@@ -1077,11 +812,11 @@
         tag,
         job: jobText,
         progress,
-        run_url: info.run_url
+        run_url: info.run_url,
+        run_id: info.run_id
       });
     }
 
-    // Set Card State
     function setCardState(stack, state, opts = {}) {
       const card = document.getElementById(stack + 'Card');
       const badge = document.getElementById(stack + 'Badge');
@@ -1091,9 +826,7 @@
       const jobTxt = document.getElementById(stack + 'JobTxt');
       const progress = document.getElementById(stack + 'Progress');
       const runLink = document.getElementById(stack + 'RunLink');
-
-      card.className = 'deploy-card active';
-      badge.className = 'status-badge';
+      const cancelBtn = document.getElementById(stack + 'CancelBtn');
 
       if (opts.client) clientTxt.textContent = opts.client;
       if (opts.tag) versionTxt.textContent = opts.tag;
@@ -1102,54 +835,127 @@
 
       if (opts.run_url) {
         runLink.href = opts.run_url;
-        runLink.style.display = 'inline-flex';
+        runLink.classList.remove('d-none');
       }
 
+      // Reset classes
+      badge.className = 'badge rounded-pill px-3 py-2';
+      card.className = 'card h-100 shadow-sm border-secondary-subtle';
+
       if (state === 'queued') {
-        badge.classList.add('badge-queued');
+        badge.className = 'badge bg-warning text-dark rounded-pill px-3 py-2 pulse-badge';
         badge.textContent = 'QUEUED';
-        spinner.style.display = 'block';
+        spinner.classList.remove('d-none');
+        if (cancelBtn) cancelBtn.classList.remove('d-none');
       } else if (state === 'deploying') {
-        badge.classList.add('badge-deploying');
+        badge.className = 'badge bg-primary rounded-pill px-3 py-2 pulse-badge';
         badge.textContent = 'DEPLOYING';
-        spinner.style.display = 'block';
+        card.classList.add('border-primary');
+        spinner.classList.remove('d-none');
+        if (cancelBtn) cancelBtn.classList.remove('d-none');
       } else if (state === 'deployed') {
-        badge.classList.add('badge-deployed');
+        badge.className = 'badge bg-success rounded-pill px-3 py-2';
         badge.textContent = 'DEPLOYED';
-        card.classList.add('card-success');
-        spinner.style.display = 'none';
+        card.classList.add('border-success');
+        spinner.classList.add('d-none');
+        if (cancelBtn) cancelBtn.classList.add('d-none');
       } else if (state === 'failed') {
-        badge.classList.add('badge-failed');
+        badge.className = 'badge bg-danger rounded-pill px-3 py-2';
         badge.textContent = 'FAILED';
-        card.classList.add('card-failed');
-        spinner.style.display = 'none';
+        card.classList.add('border-danger');
+        spinner.classList.add('d-none');
+        if (cancelBtn) cancelBtn.classList.add('d-none');
+      } else if (state === 'cancelled') {
+        badge.className = 'badge bg-secondary rounded-pill px-3 py-2';
+        badge.textContent = 'CANCELLED';
+        spinner.classList.add('d-none');
+        if (cancelBtn) cancelBtn.classList.add('d-none');
       } else {
-        badge.classList.add('badge-idle');
+        badge.className = 'badge bg-secondary-subtle text-secondary rounded-pill px-3 py-2';
         badge.textContent = 'IDLE';
-        spinner.style.display = 'none';
+        spinner.classList.add('d-none');
+        if (cancelBtn) cancelBtn.classList.add('d-none');
       }
     }
 
-    // Elapsed Timer
-    function startElapsedTimer() {
-      if (elapsedTimer) clearInterval(elapsedTimer);
-      elapsedTimer = setInterval(() => {
-        const diffSec = Math.floor((Date.now() - deployStartTime) / 1000);
-        const mins = String(Math.floor(diffSec / 60)).padStart(2, '0');
-        const secs = String(diffSec % 60).padStart(2, '0');
-        const timeStr = `Elapsed: ${mins}:${secs}`;
-        document.getElementById('frontendTimerTxt').textContent = timeStr;
-        document.getElementById('backendTimerTxt').textContent = timeStr;
+    // Active Count-Up Timer (00:00:00 format)
+    function startActiveCountUpTimer() {
+      if (timerInterval) clearInterval(timerInterval);
+      timerInterval = setInterval(() => {
+        const totalSeconds = Math.floor((Date.now() - deployStartTime) / 1000);
+        const hours = String(Math.floor(totalSeconds / 3600)).padStart(2, '0');
+        const minutes = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, '0');
+        const seconds = String(totalSeconds % 60).padStart(2, '0');
+        const formatted = `${hours}:${minutes}:${seconds}`;
+
+        if (currentFrontendTag && !cardTimers.frontend.finished) {
+          document.getElementById('frontendTimerTxt').textContent = formatted;
+          cardTimers.frontend.total = formatted;
+        }
+        if (currentBackendTag && !cardTimers.backend.finished) {
+          document.getElementById('backendTimerTxt').textContent = formatted;
+          cardTimers.backend.total = formatted;
+        }
       }, 1000);
+    }
+
+    // Stop and lock elapsed timer
+    function stopAndLockTimer() {
+      if (timerInterval) clearInterval(timerInterval);
+      if (currentFrontendTag && !cardTimers.frontend.finished) {
+        cardTimers.frontend.finished = true;
+        document.getElementById('frontendTimerTxt').textContent = `Total: ${cardTimers.frontend.total || '00:00:00'}`;
+      }
+      if (currentBackendTag && !cardTimers.backend.finished) {
+        cardTimers.backend.finished = true;
+        document.getElementById('backendTimerTxt').textContent = `Total: ${cardTimers.backend.total || '00:00:00'}`;
+      }
     }
 
     function resetDeployButton() {
       const submitBtn = document.getElementById('deploySubmitBtn');
       submitBtn.disabled = false;
-      document.getElementById('deployBtnText').textContent = 'Deploy Release';
+      document.getElementById('deployBtnIcon').className = 'bi bi-send-fill me-2';
+      document.getElementById('deployBtnText').textContent = 'Release Deployment';
     }
 
-    // Fetch Recent Runs
+    // Cancel Run Action
+    async function cancelRun(stack) {
+      const runId = currentActiveRunIds[stack];
+      if (!runId) {
+        showToast(`No active run ID found to cancel for ${stack}`, true);
+        return;
+      }
+
+      const confirmed = confirm(`Are you sure you want to cancel the ${stack.toUpperCase()} deployment run #${runId}?`);
+      if (!confirmed) return;
+
+      const btn = document.getElementById(stack + 'CancelBtn');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Cancelling...';
+
+      try {
+        const res = await fetch('/api/deploy/cancel', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ stack, run_id: runId })
+        });
+
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || 'Failed to cancel run');
+        }
+
+        showToast(`${stack.toUpperCase()} run cancellation requested!`);
+        setCardState(stack, 'cancelled', { job: 'Cancellation requested...' });
+      } catch (err) {
+        showToast(err.message, true);
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-x-circle me-1"></i> Cancel Run';
+      }
+    }
+
+    // Recent GitHub Runs Table (No action column, with Client Box)
     async function fetchRecentRuns() {
       try {
         const res = await fetch('/api/deploy/recent');
@@ -1159,42 +965,38 @@
         tbody.innerHTML = '';
 
         if (!data.data || data.data.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 20px;">No recent runs found</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted">No recent deployment runs found</td></tr>';
           return;
         }
 
         data.data.forEach(run => {
           const tr = document.createElement('tr');
           const isSuccess = run.conclusion === 'success';
-          const isPending = !run.conclusion;
-          const badgeClass = isSuccess ? 'badge-deployed' : (isPending ? 'badge-deploying' : 'badge-failed');
+          const isCancelled = run.conclusion === 'cancelled';
+          const badgeClass = isSuccess ? 'bg-success' : (isCancelled ? 'bg-secondary' : (run.conclusion ? 'bg-danger' : 'bg-warning text-dark'));
           const statusText = run.conclusion || run.status || 'unknown';
 
           tr.innerHTML = `
-            <td>
-              <span class="stack-icon ${run.stack.toLowerCase()}" style="display: inline-flex; width: 22px; height: 22px; font-size: 0.75rem;">
-                ${run.stack[0]}
-              </span>
-              <strong style="margin-left: 6px;">${run.stack}</strong>
+            <td style="padding-left: 1.25rem;">
+              <span class="stack-avatar ${run.stack.toLowerCase()[0]} me-2">${run.stack[0]}</span>
+              <strong>${escapeHtml(run.stack)}</strong>
             </td>
             <td>
-              <span class="badge-pill" style="font-weight: 700; text-transform: uppercase;">
+              <span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle rounded-pill text-uppercase px-2 py-1 font-monospace">
                 ${escapeHtml(run.client || '-')}
               </span>
             </td>
             <td>
-              <a href="${run.run_url}" target="_blank" class="github-link" title="View run on GitHub">
+              <a href="${run.run_url}" target="_blank" class="text-decoration-none text-primary fw-semibold" title="Open GitHub Actions run">
                 <span>${escapeHtml(run.name)} #${run.run_number || run.id}</span>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
-                  <polyline points="15 3 21 3 21 9"></polyline>
-                  <line x1="10" y1="14" x2="21" y2="3"></line>
-                </svg>
+                <i class="bi bi-box-arrow-up-right ms-1 small"></i>
               </a>
             </td>
-            <td><span class="status-badge ${badgeClass}">${statusText}</span></td>
-            <td>${escapeHtml(run.actor || 'system')}</td>
-            <td style="color: var(--text-muted);">${formatDate(run.created_at)}</td>
+            <td>
+              <span class="badge ${badgeClass} rounded-pill px-2 py-1 text-uppercase">${escapeHtml(statusText)}</span>
+            </td>
+            <td class="text-secondary small">${escapeHtml(run.actor || 'system')}</td>
+            <td class="text-secondary small" style="padding-right: 1.25rem;">${formatDate(run.created_at)}</td>
           `;
           tbody.appendChild(tr);
         });
@@ -1221,11 +1023,13 @@
     }
 
     function showToast(msg, isError = false) {
-      const t = document.getElementById('toast');
-      t.textContent = msg;
-      t.style.borderColor = isError ? 'var(--danger-border)' : 'var(--success-border)';
-      t.classList.add('show');
-      setTimeout(() => t.classList.remove('show'), 4000);
+      const toastEl = document.getElementById('liveToast');
+      const toastMsg = document.getElementById('toastMessage');
+      toastMsg.textContent = msg;
+      toastEl.className = isError
+        ? 'toast align-items-center text-bg-danger border-0 shadow'
+        : 'toast align-items-center text-bg-success border-0 shadow';
+      bsToast.show();
     }
   </script>
 </body>

@@ -49,6 +49,18 @@
     {
       "source": "/api/deploy/recent",
       "destination": "/api/deploy/recent"
+    },
+    {
+      "source": "/api/auth/login",
+      "destination": "/api/auth/login"
+    },
+    {
+      "source": "/api/deploy/cancel",
+      "destination": "/api/deploy/cancel"
+    },
+    {
+      "source": "/api/deploy/validate",
+      "destination": "/api/deploy/validate"
     }
   ],
   "headers": [

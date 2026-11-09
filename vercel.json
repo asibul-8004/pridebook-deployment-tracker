@@ -55,6 +55,10 @@
       "destination": "/api/auth/login"
     },
     {
+      "source": "/api/auth/verify",
+      "destination": "/api/auth/verify"
+    },
+    {
       "source": "/api/deploy/cancel",
       "destination": "/api/deploy/cancel"
     },

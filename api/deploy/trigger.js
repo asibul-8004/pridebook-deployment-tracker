@@ -26,6 +26,16 @@ module.exports = async (req, res) => {
     const backend_tag = payload.backend_tag;
     const username = payload.username;
     const password = payload.password;
+    let authToken = payload.authToken || payload.token || '';
+    if (!authToken && req.headers.authorization) {
+      const authH = req.headers.authorization;
+      if (authH.startsWith('Bearer ')) authToken = authH.slice(7).trim();
+      else authToken = authH.trim();
+    }
+    if (!authToken && req.headers.cookie) {
+      const m = req.headers.cookie.match(/pride_auth=([^;]+)/);
+      if (m) authToken = m[1];
+    }
     const token = process.env.GITHUB_TOKEN || '';
 
     const result = await deployService.triggerReleaseDeploy({
@@ -34,6 +44,7 @@ module.exports = async (req, res) => {
       backend_tag,
       username,
       password,
+      authToken,
       token
     });
 

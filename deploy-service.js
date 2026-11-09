@@ -5,6 +5,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const db = require('./db');
 
 const rootDir = __dirname;
@@ -64,6 +65,46 @@ function verifyCredentials(username, password) {
     String(username).trim() === expectedUser &&
     String(password).trim() === expectedPass
   );
+}
+
+function getAuthSecret() {
+  return process.env.AUTH_SECRET || (process.env.PASSWORD || 'prideerp') + '_pride_auth_key_2026';
+}
+
+/**
+ * Generate HMAC signed authentication token
+ */
+function generateAuthToken(username) {
+  loadEnv();
+  const effectiveUser = (username || process.env.AUTH_USERNAME || 'pridebook').trim();
+  const timestamp = Date.now();
+  const data = `${effectiveUser}:${timestamp}`;
+  const sig = crypto.createHmac('sha256', getAuthSecret()).update(data).digest('hex');
+  return Buffer.from(`${data}:${sig}`).toString('base64');
+}
+
+/**
+ * Verify HMAC signed authentication token (valid 24h)
+ */
+function verifyAuthToken(token) {
+  if (!token) return null;
+  try {
+    loadEnv();
+    const raw = Buffer.from(token, 'base64').toString('utf8');
+    const parts = raw.split(':');
+    if (parts.length !== 3) return null;
+    const [user, timeStr, sig] = parts;
+    const timestamp = parseInt(timeStr, 10);
+    if (Date.now() - timestamp > 24 * 60 * 60 * 1000) return null;
+    const expectedSig = crypto.createHmac('sha256', getAuthSecret()).update(`${user}:${timeStr}`).digest('hex');
+    const expectedUser = (process.env.AUTH_USERNAME || (process.env.USERNAME && process.env.USERNAME !== process.env.USER ? process.env.USERNAME : null) || 'pridebook').trim();
+    if (sig === expectedSig && user === expectedUser) {
+      return { valid: true, username: user };
+    }
+    return null;
+  } catch (_) {
+    return null;
+  }
 }
 
 /**
@@ -158,11 +199,19 @@ async function triggerReleaseDeploy({
   backend_tag,
   username,
   password,
+  authToken,
   token
 }) {
-  // 1. Authentication check
-  if (!verifyCredentials(username, password)) {
-    const err = new Error('Invalid username or password');
+  // 1. Authentication check (accepts either username/password or valid session token)
+  let isAuth = false;
+  if (username && password && verifyCredentials(username, password)) {
+    isAuth = true;
+  } else if (authToken && verifyAuthToken(authToken)) {
+    isAuth = true;
+  }
+
+  if (!isAuth) {
+    const err = new Error('Invalid or missing authentication credentials');
     err.statusCode = 401;
     throw err;
   }
@@ -473,6 +522,8 @@ async function getRecentDeployments(token) {
 
 module.exports = {
   verifyCredentials,
+  generateAuthToken,
+  verifyAuthToken,
   checkDeployability,
   getReleaseTags,
   triggerReleaseDeploy,

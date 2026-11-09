@@ -24,7 +24,14 @@ module.exports = async (req, res) => {
     const isValid = deployService.verifyCredentials(payload.username, payload.password);
     res.setHeader('Content-Type', 'application/json');
     if (isValid) {
-      return res.status(200).json({ success: true, message: 'Authentication successful' });
+      const token = deployService.generateAuthToken(payload.username);
+      res.setHeader('Set-Cookie', `pride_auth=${token}; Path=/; SameSite=Lax; Max-Age=86400`);
+      return res.status(200).json({
+        success: true,
+        token,
+        username: payload.username,
+        message: 'Authentication successful'
+      });
     } else {
       return res.status(401).json({ success: false, error: 'Invalid username or password' });
     }

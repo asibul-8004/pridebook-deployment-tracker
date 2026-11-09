@@ -1014,6 +1014,77 @@
       100% { transform: rotate(360deg); }
     }
 
+    /* Pride Login Modal */
+    .pride-modal-backdrop {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(3, 7, 18, 0.85);
+      backdrop-filter: blur(8px);
+      z-index: 10000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      animation: fadeIn 0.2s ease-out;
+    }
+
+    .pride-modal-card {
+      background: #111827;
+      border: 1px solid #1e293b;
+      border-radius: 14px;
+      width: 100%;
+      max-width: 440px;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+      overflow: hidden;
+      animation: scaleUp 0.2s ease-out;
+    }
+
+    .pride-modal-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid #1f2937;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .pride-modal-close {
+      background: transparent;
+      border: none;
+      color: #9ca3af;
+      font-size: 1.4rem;
+      cursor: pointer;
+      line-height: 1;
+      padding: 0;
+    }
+    .pride-modal-close:hover {
+      color: #f9fafb;
+    }
+
+    .pride-modal-body {
+      padding: 20px;
+    }
+
+    .pride-modal-footer {
+      padding: 14px 20px;
+      border-top: 1px solid #1f2937;
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      background: rgba(15, 23, 42, 0.4);
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    @keyframes scaleUp {
+      from { opacity: 0; transform: scale(0.95); }
+      to { opacity: 1; transform: scale(1); }
+    }
+
     @media (max-width: 768px) {
       header { padding: 12px 16px; }
       main { padding: 16px; }
@@ -1043,7 +1114,7 @@
         </div>
 
         <!-- ReleaseDeploy Link -->
-        <a href="/release" class="btn btn-primary" style="padding: 5px 14px; font-size: 0.82rem; font-weight: 700; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; border-radius: 9999px; box-shadow: 0 2px 8px rgba(37, 99, 235, 0.35); text-transform: none; letter-spacing: normal;" title="Open Release & Deploy Console">
+        <a href="/release" onclick="handleReleaseNav(event)" class="btn btn-primary" style="padding: 5px 14px; font-size: 0.82rem; font-weight: 700; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; border-radius: 9999px; box-shadow: 0 2px 8px rgba(37, 99, 235, 0.35); text-transform: none; letter-spacing: normal;" title="Open Release & Deploy Console">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
           </svg>
@@ -1113,7 +1184,7 @@
         </button>
 
         <!-- Tab 3: Release Page Button -->
-        <a href="/release" class="tab-btn" id="tabBtnRelease" style="text-decoration: none;">
+        <a href="/release" onclick="handleReleaseNav(event)" class="tab-btn" id="tabBtnRelease" style="text-decoration: none;">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
           </svg>
@@ -1353,6 +1424,41 @@
 
   <!-- Toast Notification Container -->
   <div class="toast-container" id="toastContainer"></div>
+
+  <!-- Pride Login Modal (Guards access to /release) -->
+  <div class="pride-modal-backdrop" id="prideLoginBackdrop" style="display: none;">
+    <div class="pride-modal-card">
+      <div class="pride-modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <div style="width: 32px; height: 32px; border-radius: 8px; background: linear-gradient(135deg, #2563eb, #8b5cf6); display: flex; align-items: center; justify-content: center; font-weight: 700; color: #fff; font-size: 0.95rem;">PB</div>
+          <h3 style="margin: 0; font-size: 1.15rem; font-weight: 700; color: #f9fafb;">Pride Login</h3>
+        </div>
+        <button type="button" class="pride-modal-close" onclick="closePrideLoginModal()" aria-label="Close">&times;</button>
+      </div>
+      <form id="dashboardPrideLoginForm" onsubmit="event.preventDefault(); submitDashboardPrideLogin();">
+        <div class="pride-modal-body">
+          <p style="color: #9ca3af; font-size: 0.85rem; margin-top: 0; margin-bottom: 16px;">
+            Authorized deployment credentials required to access the Release Console.
+          </p>
+          <div id="dashboardLoginAlert" style="display: none; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.35); color: #f87171; padding: 8px 12px; border-radius: 8px; font-size: 0.82rem; margin-bottom: 14px;"></div>
+          <div style="margin-bottom: 14px;">
+            <label style="display: block; color: #9ca3af; font-size: 0.78rem; font-weight: 700; text-transform: uppercase; margin-bottom: 6px;">Username</label>
+            <input type="text" id="dashboardLoginUser" value="pridebook" placeholder="Enter username" required style="width: 100%; box-sizing: border-box; background: #0f172a; border: 1px solid #1f2937; border-radius: 8px; color: #f9fafb; padding: 9px 12px; font-size: 0.9rem; outline: none;" />
+          </div>
+          <div style="margin-bottom: 10px;">
+            <label style="display: block; color: #9ca3af; font-size: 0.78rem; font-weight: 700; text-transform: uppercase; margin-bottom: 6px;">Password</label>
+            <input type="password" id="dashboardLoginPass" placeholder="Enter password" required style="width: 100%; box-sizing: border-box; background: #0f172a; border: 1px solid #1f2937; border-radius: 8px; color: #f9fafb; padding: 9px 12px; font-size: 0.9rem; outline: none;" />
+          </div>
+        </div>
+        <div class="pride-modal-footer">
+          <button type="button" class="btn" onclick="closePrideLoginModal()" style="font-size: 0.85rem; padding: 8px 16px;">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="dashboardLoginSubmitBtn" style="font-size: 0.85rem; padding: 8px 18px; font-weight: 700;">
+            <span>Authenticate &amp; Open Release 🚀</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <!-- ========================================== -->
   <!-- JAVASCRIPT LOGIC (CENTRAL GITHUB API & DB) -->
@@ -2319,6 +2425,79 @@
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
+    }
+
+    // Release Navigation & Pride Login Handlers
+    function openPrideLoginModal() {
+      const alertEl = document.getElementById('dashboardLoginAlert');
+      alertEl.style.display = 'none';
+      alertEl.textContent = '';
+      document.getElementById('dashboardLoginPass').value = '';
+      document.getElementById('prideLoginBackdrop').style.display = 'flex';
+      setTimeout(() => document.getElementById('dashboardLoginPass').focus(), 50);
+    }
+
+    function closePrideLoginModal() {
+      document.getElementById('prideLoginBackdrop').style.display = 'none';
+    }
+
+    async function handleReleaseNav(event) {
+      if (event) event.preventDefault();
+      const token = sessionStorage.getItem('pride_token');
+      if (token) {
+        try {
+          const res = await fetch('/api/auth/verify', {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (res.ok) {
+            window.location.href = '/release';
+            return;
+          }
+        } catch (_) {}
+      }
+      openPrideLoginModal();
+    }
+
+    async function submitDashboardPrideLogin() {
+      const user = document.getElementById('dashboardLoginUser').value.trim();
+      const pass = document.getElementById('dashboardLoginPass').value.trim();
+      const alertEl = document.getElementById('dashboardLoginAlert');
+      const btn = document.getElementById('dashboardLoginSubmitBtn');
+
+      if (!user || !pass) {
+        alertEl.textContent = 'Please enter both username and password.';
+        alertEl.style.display = 'block';
+        return;
+      }
+
+      btn.disabled = true;
+      btn.innerHTML = '<span>Verifying...</span>';
+
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: user, password: pass })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || 'Invalid credentials');
+        }
+
+        sessionStorage.setItem('pride_token', data.token);
+        sessionStorage.setItem('pride_deploy_user', data.username || user);
+        closePrideLoginModal();
+        showToast('Authenticated! Redirecting to Release Console...', 'success');
+        setTimeout(() => {
+          window.location.href = '/release';
+        }, 300);
+      } catch (err) {
+        alertEl.textContent = err.message;
+        alertEl.style.display = 'block';
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<span>Authenticate &amp; Open Release 🚀</span>';
+      }
     }
   </script>
 </body>

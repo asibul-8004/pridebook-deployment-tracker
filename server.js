@@ -465,8 +465,17 @@ const server = http.createServer(async (req, res) => {
         const payload = JSON.parse(body || '{}');
         const isValid = deployService.verifyCredentials(payload.username, payload.password);
         if (isValid) {
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: true, message: 'Authentication successful' }));
+          const token = deployService.generateAuthToken(payload.username);
+          res.writeHead(200, {
+            'Content-Type': 'application/json',
+            'Set-Cookie': `pride_auth=${token}; Path=/; SameSite=Lax; Max-Age=86400`
+          });
+          res.end(JSON.stringify({
+            success: true,
+            token,
+            username: payload.username,
+            message: 'Authentication successful'
+          }));
         } else {
           res.writeHead(401, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ success: false, error: 'Invalid username or password' }));
@@ -476,6 +485,42 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ success: false, error: err.message }));
       }
     });
+    return;
+  }
+
+  // GET /api/auth/verify - Verify authentication session
+  if (pathname === '/api/auth/verify') {
+    let token = '';
+    const authHeader = req.headers.authorization || req.headers['x-pride-auth'] || '';
+    if (authHeader.startsWith('Bearer ')) {
+      token = authHeader.slice(7).trim();
+    } else if (authHeader) {
+      token = authHeader.trim();
+    }
+
+    if (!token && req.headers.cookie) {
+      const match = req.headers.cookie.match(/pride_auth=([^;]+)/);
+      if (match) token = match[1];
+    }
+
+    if (!token && parsedUrl.searchParams.get('token')) {
+      token = parsedUrl.searchParams.get('token');
+    }
+
+    const verified = deployService.verifyAuthToken(token);
+    if (verified && verified.valid) {
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache, no-store, must-revalidate'
+      });
+      res.end(JSON.stringify({ success: true, authenticated: true, username: verified.username }));
+    } else {
+      res.writeHead(401, {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache, no-store, must-revalidate'
+      });
+      res.end(JSON.stringify({ success: false, authenticated: false, error: 'Unauthorized' }));
+    }
     return;
   }
 
@@ -531,12 +576,24 @@ const server = http.createServer(async (req, res) => {
     req.on('end', async () => {
       try {
         const payload = JSON.parse(body || '{}');
+        let authToken = payload.authToken || payload.token || '';
+        if (!authToken && req.headers.authorization) {
+          const authH = req.headers.authorization;
+          if (authH.startsWith('Bearer ')) authToken = authH.slice(7).trim();
+          else authToken = authH.trim();
+        }
+        if (!authToken && req.headers.cookie) {
+          const m = req.headers.cookie.match(/pride_auth=([^;]+)/);
+          if (m) authToken = m[1];
+        }
+
         const result = await deployService.triggerReleaseDeploy({
           client: payload.client,
           frontend_tag: payload.frontend_tag,
           backend_tag: payload.backend_tag,
           username: payload.username,
           password: payload.password,
+          authToken,
           token: GITHUB_TOKEN
         });
         res.writeHead(200, { 'Content-Type': 'application/json' });

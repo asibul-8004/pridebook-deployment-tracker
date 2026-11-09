@@ -4,12 +4,18 @@
  * 
  * Supports:
  * - Oracle Database 19c (Thin Mode - Zero External Client Binaries)
- * - Native SQLite (fallback / local standalone)
+ * - Native SQLite (fallback / local standalone / serverless)
  * 
- * Architecture:
- * - Merged client table SA_DEPLOYMENT_TRACKER (Frontend & Backend combined, no STACK column).
- * - Chronological merge tracking for Frontend & Backend deployments.
- * - Security: Database credentials strictly from .env.
+ * Master-Detail Architecture:
+ * - Master Table: SA_DEPLOYMENT_TRACKER (Client boxes & latest merged version snapshot)
+ * - Child Table : SA_DEPLOYMENT_TRACKER_DTL (Chronological deployment & release history)
+ * 
+ * Synchronization Strategy:
+ * - Internally fetches deployment metadata from GitHub repositories.
+ * - Compares with database records to detect mismatches / new releases.
+ * - Automatically onboards new clients into master table SA_DEPLOYMENT_TRACKER.
+ * - Inserts chronological release history into child table SA_DEPLOYMENT_TRACKER_DTL.
+ * - ALWAYS returns and renders data directly from the Database.
  */
 
 const fs = require('fs');
@@ -38,7 +44,6 @@ function resolveDbPath() {
     return path.join('/tmp', 'deployments.db');
   }
 
-  // Test whether root directory is writable
   try {
     const testFile = path.join(rootDir, `.write_test_${Date.now()}`);
     fs.writeFileSync(testFile, '1');
@@ -54,6 +59,7 @@ let sqliteInstance = null;
 let oracleDb = null;
 let mergedHistoryCache = [];
 const inMemoryStore = new Map();
+let lastSyncCheckTime = 0;
 
 function isOracleConfigured() {
   const dbType = (process.env.DB_TYPE || '').toLowerCase();
@@ -100,6 +106,7 @@ function getSqliteDb() {
 
 function initSqliteSchema(db) {
   try {
+    // Master Table: SA_DEPLOYMENT_TRACKER
     db.exec(`
       CREATE TABLE IF NOT EXISTS SA_DEPLOYMENT_TRACKER (
         deployment_tracker_no INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -121,13 +128,37 @@ function initSqliteSchema(db) {
       CREATE INDEX IF NOT EXISTS idx_sa_deploy_client ON SA_DEPLOYMENT_TRACKER(client_name);
       CREATE INDEX IF NOT EXISTS idx_sa_deploy_flag ON SA_DEPLOYMENT_TRACKER(is_deployable_to_client);
     `);
+
+    // Child Detail Table: SA_DEPLOYMENT_TRACKER_DTL
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS SA_DEPLOYMENT_TRACKER_DTL (
+        deployment_tracker_dtl_no INTEGER PRIMARY KEY AUTOINCREMENT,
+        deployment_tracker_no INTEGER NOT NULL,
+        client_name TEXT NOT NULL,
+        event_stack TEXT NOT NULL,
+        frontend_version TEXT DEFAULT 'unknown',
+        backend_version TEXT DEFAULT 'unknown',
+        status TEXT DEFAULT 'success',
+        deployed_by TEXT DEFAULT 'system',
+        frontend_deployed_at TEXT,
+        backend_deployed_at TEXT,
+        run_id TEXT,
+        event_time TEXT,
+        created_at TEXT,
+        FOREIGN KEY (deployment_tracker_no) REFERENCES SA_DEPLOYMENT_TRACKER(deployment_tracker_no) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_sa_deploy_dtl_fk ON SA_DEPLOYMENT_TRACKER_DTL(deployment_tracker_no);
+      CREATE INDEX IF NOT EXISTS idx_sa_deploy_dtl_client ON SA_DEPLOYMENT_TRACKER_DTL(client_name);
+      CREATE INDEX IF NOT EXISTS idx_sa_deploy_dtl_time ON SA_DEPLOYMENT_TRACKER_DTL(event_time);
+    `);
   } catch (err) {
     console.warn('[SQLite Schema Warn]:', err.message);
   }
 }
 
 /**
- * Get all merged client deployments from active DB
+ * Get all merged client deployments from active DB (Master Table: SA_DEPLOYMENT_TRACKER)
  */
 async function getAllDeployments(filters = {}) {
   const oracle = getOracleModule();
@@ -195,6 +226,68 @@ async function getAllDeployments(filters = {}) {
     list = list.filter(r => r.is_deployable_to_client === parseInt(filters.is_deployable, 10));
   }
   return list;
+}
+
+/**
+ * Get deployment history from active DB (Child Table: SA_DEPLOYMENT_TRACKER_DTL)
+ */
+async function getDeploymentHistory(clientFilter) {
+  const oracle = getOracleModule();
+  if (oracle) {
+    try {
+      const history = await oracle.getDeploymentHistory(clientFilter);
+      if (Array.isArray(history) && history.length > 0) {
+        return history;
+      }
+    } catch (err) {
+      console.warn('[Oracle History Warn]: Falling back to SQLite/memory:', err.message);
+    }
+  }
+
+  // SQLite fallback
+  const db = getSqliteDb();
+  if (db) {
+    try {
+      let sql = `
+        SELECT 
+          dtl.deployment_tracker_dtl_no AS id,
+          dtl.deployment_tracker_dtl_no,
+          dtl.deployment_tracker_no,
+          dtl.client_name,
+          dtl.event_stack,
+          dtl.frontend_version,
+          dtl.backend_version,
+          dtl.status,
+          dtl.deployed_by,
+          dtl.frontend_deployed_at,
+          dtl.backend_deployed_at,
+          dtl.run_id,
+          dtl.event_time,
+          COALESCE(m.is_deployable_to_client, 0) AS is_deployable_to_client
+        FROM SA_DEPLOYMENT_TRACKER_DTL dtl
+        LEFT JOIN SA_DEPLOYMENT_TRACKER m ON dtl.deployment_tracker_no = m.deployment_tracker_no
+        WHERE 1=1
+      `;
+      const params = [];
+      if (clientFilter && clientFilter !== 'all') {
+        sql += ` AND LOWER(dtl.client_name) = LOWER(?)`;
+        params.push(clientFilter);
+      }
+      sql += ` ORDER BY dtl.event_time DESC, dtl.deployment_tracker_dtl_no DESC`;
+
+      const stmt = db.prepare(sql);
+      const rows = stmt.all(...params);
+      if (rows && rows.length > 0) return rows;
+    } catch (err) {
+      // In case detail table not populated yet
+    }
+  }
+
+  // Fallback to memory cache
+  if (clientFilter && clientFilter !== 'all') {
+    return mergedHistoryCache.filter(h => h.client_name.toLowerCase() === clientFilter.toLowerCase());
+  }
+  return mergedHistoryCache;
 }
 
 /**
@@ -267,7 +360,7 @@ async function updateDeployableFlag(idOrClient, flagValue) {
 }
 
 /**
- * Upsert deployment record into SQLite fallback
+ * Upsert deployment record into master table. Auto-onboards client if not present.
  */
 async function upsertDeployment(record) {
   const oracle = getOracleModule();
@@ -284,6 +377,8 @@ async function upsertDeployment(record) {
 
   // SQLite fallback
   const db = getSqliteDb();
+  let trackerNo = null;
+
   if (db) {
     try {
       const stmt = db.prepare(`
@@ -319,6 +414,9 @@ async function upsertDeployment(record) {
         now,
         now
       );
+
+      const row = db.prepare('SELECT deployment_tracker_no FROM SA_DEPLOYMENT_TRACKER WHERE client_name = ?').get(client_name);
+      if (row) trackerNo = row.deployment_tracker_no;
     } catch (err) {
       console.warn('[SQLite Upsert Warn]:', err.message);
     }
@@ -326,9 +424,11 @@ async function upsertDeployment(record) {
 
   // Secondary in-memory cache update
   const existing = inMemoryStore.get(client_name) || { is_deployable_to_client: 0, deployment_tracker_no: inMemoryStore.size + 1 };
+  const calculatedNo = trackerNo || existing.deployment_tracker_no || (inMemoryStore.size + 1);
+
   inMemoryStore.set(client_name, {
-    id: existing.deployment_tracker_no || inMemoryStore.size + 1,
-    deployment_tracker_no: existing.deployment_tracker_no || inMemoryStore.size + 1,
+    id: calculatedNo,
+    deployment_tracker_no: calculatedNo,
     client_name,
     frontend_version: record.frontend_version || 'unknown',
     backend_version: record.backend_version || 'unknown',
@@ -343,6 +443,8 @@ async function upsertDeployment(record) {
     synced_at: now,
     updated_at: now
   });
+
+  return calculatedNo;
 }
 
 /**
@@ -407,7 +509,7 @@ async function fetchFrontendRawData(token) {
       }
     }
   } catch (err) {
-    console.warn(`[Sync] Failed to fetch frontend deployments.json:`, err.message);
+    console.warn(`[Sync] Failed to fetch frontend deployments.json from GitHub:`, err.message);
   }
 
   // Fallback to local deployments.json if needed
@@ -455,7 +557,7 @@ async function fetchBackendRawData(token) {
         const runsData = await res.json();
         const runs = runsData.workflow_runs || [];
 
-        // Check each release deploy workflow
+        // Check release deploy workflow runs
         await Promise.all(runs.map(async (run) => {
           if (!run.name || !run.name.includes('Release Deploy')) return;
           try {
@@ -489,104 +591,226 @@ async function fetchBackendRawData(token) {
 }
 
 /**
- * Synchronize DB table from GitHub repositories using chronological merge
+ * Internal Sync Engine:
+ * 1. Checks GitHub deployment data internally.
+ * 2. Compares against DB to detect new clients (auto-onboard) or version mismatches.
+ * 3. Updates master table SA_DEPLOYMENT_TRACKER and child table SA_DEPLOYMENT_TRACKER_DTL.
+ * 4. ALWAYS queries and returns the data directly from the Database.
  */
-async function syncDatabaseFromGitHub(token) {
-  const frontendEvents = await fetchFrontendRawData(token);
-  const backendEvents = await fetchBackendRawData(token);
+async function getDeploymentsWithSync(options = {}) {
+  const token = options.token || process.env.GITHUB_TOKEN || '';
+  const forceSync = options.forceSync === true;
+  const now = Date.now();
 
-  const standardClients = ['stage', 'shinshin', 'bengal', 'karupannya', 'ananta-uat', 'ananta-live'];
-  const allClientNames = Array.from(new Set([
-    ...standardClients,
-    ...Object.keys(frontendEvents),
-    ...Object.keys(backendEvents)
-  ]));
+  // Rate-limit automated checks to at most once every 15 seconds unless forced
+  const shouldCheckGitHub = forceSync || (now - lastSyncCheckTime > 15000);
 
-  const latestMergedClients = [];
-  const fullMergedTimeline = [];
-
-  for (const client of allClientNames) {
-    const rawF = (frontendEvents[client] || []).filter(e => e.timestamp);
-    const rawB = (backendEvents[client] || []).filter(e => e.timestamp);
-
-    // Sort all events chronologically (oldest to newest)
-    const combinedEvents = [...rawF, ...rawB].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-
-    let curF = { version: 'unknown', deployed_at: null, deployed_by: null, run_id: null, status: 'pending_first_deploy' };
-    let curB = { version: 'unknown', deployed_at: null, deployed_by: null, run_id: null, status: 'pending_first_deploy' };
-
-    for (const ev of combinedEvents) {
-      if (ev.stack === 'F') {
-        curF = {
-          version: ev.version,
-          deployed_at: ev.timestamp,
-          deployed_by: ev.deployed_by,
-          run_id: ev.run_id,
-          status: ev.status
-        };
-      } else if (ev.stack === 'B') {
-        curB = {
-          version: ev.version,
-          deployed_at: ev.timestamp,
-          deployed_by: ev.deployed_by,
-          run_id: ev.run_id,
-          status: ev.status
-        };
+  if (shouldCheckGitHub) {
+    lastSyncCheckTime = now;
+    try {
+      // 1. Fetch current database state
+      const currentDbDeployments = await getAllDeployments();
+      const currentDbMap = new Map();
+      for (const row of currentDbDeployments) {
+        currentDbMap.set((row.client_name || '').toLowerCase(), row);
       }
 
-      // Snapshot at this point in time
-      fullMergedTimeline.push({
-        client_name: client,
-        event_stack: ev.stack, // which component triggered this event ('F' or 'B')
-        frontend_version: curF.version,
-        backend_version: curB.version,
-        frontend_deployed_at: curF.deployed_at,
-        backend_deployed_at: curB.deployed_at,
-        deployed_by: ev.deployed_by || 'system',
-        status: ev.status || 'success',
-        run_id: ev.run_id,
-        event_time: ev.timestamp
-      });
+      // 2. Fetch latest GitHub data internally
+      const frontendEvents = await fetchFrontendRawData(token);
+      const backendEvents = await fetchBackendRawData(token);
+
+      const standardClients = ['stage', 'shinshin', 'bengal', 'karupannya', 'ananta-uat', 'ananta-live'];
+      const allClientNames = Array.from(new Set([
+        ...standardClients,
+        ...Object.keys(frontendEvents),
+        ...Object.keys(backendEvents)
+      ]));
+
+      let isMismatch = false;
+      const calculatedClients = [];
+      const fullTimeline = [];
+
+      for (const client of allClientNames) {
+        const dbRow = currentDbMap.get(client);
+        if (!dbRow) {
+          // New client onboarded! Not in database yet
+          isMismatch = true;
+        }
+
+        const rawF = (frontendEvents[client] || []).filter(e => e.timestamp);
+        const rawB = (backendEvents[client] || []).filter(e => e.timestamp);
+
+        const combinedEvents = [...rawF, ...rawB].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+        let curF = { version: 'unknown', deployed_at: null, deployed_by: null, run_id: null, status: 'pending_first_deploy' };
+        let curB = { version: 'unknown', deployed_at: null, deployed_by: null, run_id: null, status: 'pending_first_deploy' };
+
+        for (const ev of combinedEvents) {
+          if (ev.stack === 'F') {
+            curF = {
+              version: ev.version,
+              deployed_at: ev.timestamp,
+              deployed_by: ev.deployed_by,
+              run_id: ev.run_id,
+              status: ev.status
+            };
+          } else if (ev.stack === 'B') {
+            curB = {
+              version: ev.version,
+              deployed_at: ev.timestamp,
+              deployed_by: ev.deployed_by,
+              run_id: ev.run_id,
+              status: ev.status
+            };
+          }
+
+          fullTimeline.push({
+            client_name: client,
+            event_stack: ev.stack,
+            frontend_version: curF.version,
+            backend_version: curB.version,
+            frontend_deployed_at: curF.deployed_at,
+            backend_deployed_at: curB.deployed_at,
+            deployed_by: ev.deployed_by || 'system',
+            status: ev.status || 'success',
+            run_id: ev.run_id,
+            event_time: ev.timestamp
+          });
+        }
+
+        const overallStatus = (curF.status === 'success' || curB.status === 'success')
+          ? 'success'
+          : (curF.status || curB.status || 'pending_first_deploy');
+
+        const latestRecord = {
+          client_name: client,
+          frontend_version: curF.version,
+          backend_version: curB.version,
+          status: overallStatus,
+          deployed_by: curF.deployed_by || curB.deployed_by || 'system',
+          frontend_deployed_at: curF.deployed_at,
+          backend_deployed_at: curB.deployed_at,
+          frontend_run_id: curF.run_id,
+          backend_run_id: curB.run_id,
+          is_deployable_to_client: dbRow ? dbRow.is_deployable_to_client : 0
+        };
+
+        calculatedClients.push(latestRecord);
+
+        if (dbRow) {
+          if (
+            dbRow.frontend_version !== latestRecord.frontend_version ||
+            dbRow.backend_version !== latestRecord.backend_version ||
+            dbRow.frontend_deployed_at !== latestRecord.frontend_deployed_at ||
+            dbRow.backend_deployed_at !== latestRecord.backend_deployed_at ||
+            dbRow.status !== latestRecord.status
+          ) {
+            isMismatch = true;
+          }
+        }
+      }
+
+      // Check if DB is empty or has mismatches
+      if (isMismatch || forceSync || currentDbDeployments.length === 0) {
+        console.log(`[DB Sync] Mismatch or sync requested. Syncing ${calculatedClients.length} clients to database...`);
+
+        // 1. Sync Master Table SA_DEPLOYMENT_TRACKER
+        for (const clientRecord of calculatedClients) {
+          await upsertDeployment(clientRecord);
+        }
+
+        // 2. Sync Child Table SA_DEPLOYMENT_TRACKER_DTL on Oracle
+        const oracle = getOracleModule();
+        if (oracle) {
+          try {
+            await oracle.syncHistoryEvents(fullTimeline);
+          } catch (e) {
+            console.warn('[Oracle History Sync Warn]:', e.message);
+          }
+        }
+
+        // 3. Sync Child Table on SQLite
+        const db = getSqliteDb();
+        if (db) {
+          try {
+            const masterRows = db.prepare('SELECT deployment_tracker_no, LOWER(client_name) AS name FROM SA_DEPLOYMENT_TRACKER').all();
+            const clientTrackerMap = {};
+            for (const r of masterRows) clientTrackerMap[r.name] = r.deployment_tracker_no;
+
+            const insertDtlStmt = db.prepare(`
+              INSERT INTO SA_DEPLOYMENT_TRACKER_DTL (
+                deployment_tracker_no, client_name, event_stack, frontend_version,
+                backend_version, status, deployed_by, frontend_deployed_at,
+                backend_deployed_at, run_id, event_time, created_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `);
+
+            for (const ev of fullTimeline) {
+              const trackerNo = clientTrackerMap[ev.client_name.toLowerCase()];
+              if (trackerNo) {
+                const existing = db.prepare(`
+                  SELECT 1 FROM SA_DEPLOYMENT_TRACKER_DTL 
+                  WHERE deployment_tracker_no = ? AND event_stack = ? AND (run_id = ? OR event_time = ?)
+                `).get(trackerNo, ev.event_stack, ev.run_id || '', ev.event_time);
+
+                if (!existing) {
+                  insertDtlStmt.run(
+                    trackerNo,
+                    ev.client_name,
+                    ev.event_stack,
+                    ev.frontend_version,
+                    ev.backend_version,
+                    ev.status,
+                    ev.deployed_by,
+                    ev.frontend_deployed_at,
+                    ev.backend_deployed_at,
+                    ev.run_id ? String(ev.run_id) : null,
+                    ev.event_time,
+                    new Date().toISOString()
+                  );
+                }
+              }
+            }
+          } catch (sqliteErr) {
+            console.warn('[SQLite History Sync Warn]:', sqliteErr.message);
+          }
+        }
+
+        // Update sorted memory cache
+        mergedHistoryCache = fullTimeline.sort((a, b) => new Date(b.event_time) - new Date(a.event_time));
+      } else {
+        // If DB is already up-to-date and memory cache is empty, populate cache
+        if (mergedHistoryCache.length === 0 && fullTimeline.length > 0) {
+          mergedHistoryCache = fullTimeline.sort((a, b) => new Date(b.event_time) - new Date(a.event_time));
+        }
+      }
+    } catch (err) {
+      console.warn('[Internal GitHub Check Warn]:', err.message);
     }
-
-    // Determine latest combined status
-    const overallStatus = (curF.status === 'success' || curB.status === 'success') 
-      ? 'success' 
-      : (curF.status || curB.status || 'pending_first_deploy');
-
-    const mergedRecord = {
-      client_name: client,
-      frontend_version: curF.version,
-      backend_version: curB.version,
-      status: overallStatus,
-      deployed_by: curF.deployed_by || curB.deployed_by || 'system',
-      frontend_deployed_at: curF.deployed_at,
-      backend_deployed_at: curB.deployed_at,
-      frontend_run_id: curF.run_id,
-      backend_run_id: curB.run_id,
-      is_deployable_to_client: 0
-    };
-
-    latestMergedClients.push(mergedRecord);
-
-    // Upsert into active DB table SA_DEPLOYMENT_TRACKER
-    await upsertDeployment(mergedRecord);
   }
 
-  // Update memory cache for history queries (newest first)
-  mergedHistoryCache = fullMergedTimeline.sort((a, b) => new Date(b.event_time) - new Date(a.event_time));
+  // 4. ALWAYS return data directly from the Database!
+  const finalDeployments = await getAllDeployments();
+  const finalHistory = await getDeploymentHistory();
 
-  return await getAllDeployments();
+  return {
+    success: true,
+    db_type: getActiveDbType(),
+    source: 'database',
+    count: finalDeployments.length,
+    deployable_count: finalDeployments.filter(c => c.is_deployable_to_client === 0).length,
+    issue_count: finalDeployments.filter(c => c.is_deployable_to_client === 1).length,
+    data: finalDeployments,
+    history: (finalHistory && finalHistory.length > 0) ? finalHistory : mergedHistoryCache,
+    synced_at: new Date().toISOString()
+  };
 }
 
 /**
- * Get merged history timeline (for Tab 2)
+ * Legacy compatibility wrapper for explicit sync triggers
  */
-function getMergedHistory(clientFilter) {
-  if (clientFilter && clientFilter !== 'all') {
-    return mergedHistoryCache.filter(h => h.client_name.toLowerCase() === clientFilter.toLowerCase());
-  }
-  return mergedHistoryCache;
+async function syncDatabaseFromGitHub(token) {
+  return await getDeploymentsWithSync({ token, forceSync: true });
 }
 
 function getActiveDbType() {
@@ -595,10 +819,11 @@ function getActiveDbType() {
 
 module.exports = {
   getAllDeployments,
+  getDeploymentHistory,
   updateDeployableFlag,
   upsertDeployment,
+  getDeploymentsWithSync,
   syncDatabaseFromGitHub,
-  getMergedHistory,
   getActiveDbType,
   get DB_PATH() {
     return activeDbPath;

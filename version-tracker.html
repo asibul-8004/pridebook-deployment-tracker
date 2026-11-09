@@ -1501,71 +1501,44 @@
       if (isManual) refreshIcon.classList.add('spin');
 
       try {
-        let loadedFromDb = false;
+        const isHttp = window.location.protocol.startsWith('http');
+        const apiUrl = isHttp
+          ? `/api/deployments?sync=${isManual ? 'true' : 'false'}&t=${Date.now()}`
+          : `deployments.json?t=${Date.now()}`;
 
-        // 1. Fetch from DB endpoint (which triggers sync from GitHub when requested)
-        if (window.location.protocol.startsWith('http')) {
-          try {
-            const dbUrl = `/api/db/deployments?sync=${isManual ? 'true' : 'false'}&t=${Date.now()}`;
-            const dbRes = await fetch(dbUrl, {
-              headers: {
-                'Cache-Control': 'no-cache, no-store, must-revalidate',
-                'Pragma': 'no-cache'
-              }
-            });
-            if (dbRes.ok) {
-              const dbJson = await dbRes.json();
-              if (dbJson.success && Array.isArray(dbJson.data) && dbJson.data.length > 0) {
-                dbDeployments = dbJson.data;
-                loadedFromDb = true;
-              }
-            }
-          } catch (e) {
-            console.warn('DB endpoint not available:', e.message);
-          }
-
-          // 1b. Fetch merged history
-          try {
-            const histUrl = `/api/deployments/history?t=${Date.now()}`;
-            const histRes = await fetch(histUrl, {
-              headers: {
-                'Cache-Control': 'no-cache, no-store, must-revalidate',
-                'Pragma': 'no-cache'
-              }
-            });
-            if (histRes.ok) {
-              const histJson = await histRes.json();
-              if (histJson.success && Array.isArray(histJson.data)) {
-                mergedHistory = histJson.data;
-              }
-            }
-          } catch (e) {
-            console.warn('History endpoint not available:', e.message);
-          }
-        }
-
-        // 2. Fetch or fallback to deployments.json
-        const fallbackUrl = (window.location.protocol.startsWith('http') ? '/deployments.json?source=github' : 'deployments.json') + `&t=${Date.now()}`;
-        const res = await fetch(fallbackUrl, {
+        const res = await fetch(apiUrl, {
           headers: {
             'Cache-Control': 'no-cache, no-store, must-revalidate',
             'Pragma': 'no-cache'
           }
         });
-        if (res.ok) {
-          const data = await res.json();
-          rawData = data;
-          if (!loadedFromDb) {
-            if (Array.isArray(data._db_deployments) && data._db_deployments.length > 0) {
-              dbDeployments = data._db_deployments;
-            } else {
-              dbDeployments = buildDbDeploymentsFromRaw(data);
-            }
+
+        if (!res.ok) {
+          throw new Error(`API returned HTTP ${res.status}`);
+        }
+
+        const json = await res.json();
+
+        // Unified Database Response: data (SA_DEPLOYMENT_TRACKER) + history (SA_DEPLOYMENT_TRACKER_DTL)
+        if (json.success && Array.isArray(json.data)) {
+          dbDeployments = json.data;
+          if (Array.isArray(json.history)) {
+            mergedHistory = json.history;
           }
+        } else if (Array.isArray(json._db_deployments) && json._db_deployments.length > 0) {
+          dbDeployments = json._db_deployments;
+          if (Array.isArray(json._db_history)) {
+            mergedHistory = json._db_history;
+          }
+        } else if (Array.isArray(json)) {
+          dbDeployments = json;
+        } else {
+          rawData = json;
+          dbDeployments = buildDbDeploymentsFromRaw(json);
         }
 
         syncDot.className = 'pulse-dot';
-        syncText.innerText = `Synced: ${new Date().toLocaleTimeString()}`;
+        syncText.innerText = `Synced: ${new Date().toLocaleTimeString()} (${json.db_type || 'DB'})`;
         if (isManual) showToast('Deployment records synced with Database & GitHub!');
       } catch (err) {
         console.error('Fetch deployments failed:', err);

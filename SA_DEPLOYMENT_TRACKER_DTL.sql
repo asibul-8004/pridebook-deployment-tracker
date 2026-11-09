@@ -1,0 +1,54 @@
+-- =============================================================================
+-- ORACLE DATABASE DDL SCRIPT (CHILD / DETAIL TABLE)
+-- Table Name  : SA_DEPLOYMENT_TRACKER_DTL
+-- Schema Owner: bms (or application schema)
+-- Tablespace  : SIT
+-- Database    : Oracle Database 19c
+--
+-- Description : Stores chronological deployment history progression per client box
+--               Child table linked to SA_DEPLOYMENT_TRACKER (Master)
+-- =============================================================================
+
+CREATE TABLE SA_DEPLOYMENT_TRACKER_DTL (
+    -- Primary Key & Master Reference
+    DEPLOYMENT_TRACKER_DTL_NO   NUMBER(30)         NOT NULL,
+    DEPLOYMENT_TRACKER_NO       NUMBER(30)         NOT NULL,
+
+    -- Deployment Event & Release Columns
+    CLIENT_NAME                 VARCHAR2(100 BYTE) NOT NULL,
+    EVENT_STACK                 VARCHAR2(10 BYTE)  NOT NULL, -- 'F' for Frontend, 'B' for Backend
+    FRONTEND_VERSION            VARCHAR2(100 BYTE) DEFAULT 'unknown',
+    BACKEND_VERSION             VARCHAR2(100 BYTE) DEFAULT 'unknown',
+    STATUS                      VARCHAR2(50 BYTE)  DEFAULT 'success',
+    DEPLOYED_BY                 VARCHAR2(100 BYTE) DEFAULT 'system',
+    FRONTEND_DEPLOYED_AT        VARCHAR2(100 BYTE),
+    BACKEND_DEPLOYED_AT         VARCHAR2(100 BYTE),
+    RUN_ID                      VARCHAR2(100 BYTE),
+    EVENT_TIME                  VARCHAR2(100 BYTE),
+
+    -- Standard PrideSys ERP Audit & Control Columns
+    SS_CREATOR                  NUMBER(30),
+    SS_CREATED_ON               VARCHAR2(50 BYTE),
+    SS_MODIFIER                 NUMBER(30),
+    SS_MODIFIED_ON              VARCHAR2(50 BYTE),
+    COMPANY_NO                  NUMBER(30),
+    SS_OG_NO                    NUMBER(10),
+    SS_UPLOADED_ON              VARCHAR2(50 BYTE),
+    SS_IS_DELETED               NUMBER(1)          DEFAULT 0,
+    SS_IS_UPLOADED              NUMBER(1)          DEFAULT 0
+)
+TABLESPACE SIT
+LOGGING
+NOCOMPRESS
+NOCACHE
+ENABLE ROW MOVEMENT;
+
+-- Performance Indexes on Tablespace SIT
+CREATE INDEX IDX_SA_DEPLOY_DTL_FK     ON SA_DEPLOYMENT_TRACKER_DTL (DEPLOYMENT_TRACKER_NO) TABLESPACE SIT;
+CREATE INDEX IDX_SA_DEPLOY_DTL_CLIENT ON SA_DEPLOYMENT_TRACKER_DTL (CLIENT_NAME)           TABLESPACE SIT;
+CREATE INDEX IDX_SA_DEPLOY_DTL_TIME   ON SA_DEPLOYMENT_TRACKER_DTL (EVENT_TIME)             TABLESPACE SIT;
+
+-- Constraints
+ALTER TABLE SA_DEPLOYMENT_TRACKER_DTL ADD CONSTRAINT SA_DEPLOYMENT_TRACKER_DTL_PK   PRIMARY KEY (DEPLOYMENT_TRACKER_DTL_NO);
+ALTER TABLE SA_DEPLOYMENT_TRACKER_DTL ADD CONSTRAINT SA_DEPLOYMENT_TRACKER_DTL_FK01 FOREIGN KEY (DEPLOYMENT_TRACKER_NO) REFERENCES SA_DEPLOYMENT_TRACKER (DEPLOYMENT_TRACKER_NO) ON DELETE CASCADE;
+ALTER TABLE SA_DEPLOYMENT_TRACKER_DTL ADD CONSTRAINT SA_DEPLOYMENT_TRACKER_DTL_C01  CHECK (EVENT_STACK IN ('F', 'B'));

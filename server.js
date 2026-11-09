@@ -177,20 +177,18 @@ const server = http.createServer(async (req, res) => {
     }
 
     // GET /api/db/deployments - Query database records (with optional sync & stack filters)
-    if (pathname === '/api/db/deployments' && req.method === 'GET') {
+    // GET /api/deployments or /api/db/deployments
+    if ((pathname === '/api/deployments' || pathname === '/api/db/deployments') && req.method === 'GET') {
       try {
-        const shouldSync = parsedUrl.searchParams.get('sync') === 'true';
+        const forceSync = parsedUrl.searchParams.get('sync') === 'true' || parsedUrl.searchParams.get('sync') === '1';
         const clientFilter = parsedUrl.searchParams.get('client');
 
-        let rows = await db.getAllDeployments({ client_name: clientFilter });
+        // Internal synchronization: checks GitHub against DB, onboards new clients, updates DB, records history in DTL table
+        const result = await db.getDeploymentsWithSync({ token: GITHUB_TOKEN, forceSync });
+        let rows = result.data || [];
 
-        if (shouldSync || rows.length === 0) {
-          try {
-            await db.syncDatabaseFromGitHub(GITHUB_TOKEN);
-            rows = await db.getAllDeployments({ client_name: clientFilter });
-          } catch (err) {
-            console.warn('[DB Sync Warn]:', err.message);
-          }
+        if (clientFilter && clientFilter !== 'all') {
+          rows = rows.filter(r => (r.client_name || '').toLowerCase() === clientFilter.toLowerCase());
         }
 
         res.writeHead(200, {
@@ -199,14 +197,17 @@ const server = http.createServer(async (req, res) => {
         });
         res.end(JSON.stringify({
           success: true,
-          db_type: db.getActiveDbType(),
+          db_type: result.db_type,
+          source: 'database',
           count: rows.length,
           deployable_count: rows.filter(r => r.is_deployable_to_client === 0).length,
           issue_count: rows.filter(r => r.is_deployable_to_client === 1).length,
-          data: rows
+          data: rows,
+          history: result.history || [],
+          synced_at: result.synced_at
         }, null, 2));
       } catch (err) {
-        console.error('[API Error /api/db/deployments]:', err.message);
+        console.error('[API Error /api/deployments]:', err.message);
         res.writeHead(500, {
           'Content-Type': 'application/json',
           'Cache-Control': 'no-cache, no-store, must-revalidate'
@@ -219,25 +220,22 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    // GET /api/deployments/history or /api/db/history - Chronological merged history timeline
+    // GET /api/deployments/history or /api/db/history - Child Table (SA_DEPLOYMENT_TRACKER_DTL) history
     if ((pathname === '/api/deployments/history' || pathname === '/api/db/history') && req.method === 'GET') {
       try {
         const clientFilter = parsedUrl.searchParams.get('client');
-        let history = db.getMergedHistory(clientFilter);
-        if (history.length === 0) {
-          try {
-            await db.syncDatabaseFromGitHub(GITHUB_TOKEN);
-            history = db.getMergedHistory(clientFilter);
-          } catch (e) {}
-        }
+        const history = await db.getDeploymentHistory(clientFilter);
+
         res.writeHead(200, {
           'Content-Type': 'application/json',
           'Cache-Control': 'no-cache, no-store, must-revalidate'
         });
         res.end(JSON.stringify({
           success: true,
-          count: history.length,
-          data: history
+          db_type: db.getActiveDbType(),
+          source: 'database',
+          count: history ? history.length : 0,
+          data: history || []
         }, null, 2));
       } catch (err) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -246,16 +244,17 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    // POST or GET /api/db/sync - Trigger synchronization with GitHub
+    // POST or GET /api/db/sync - Trigger explicit synchronization with GitHub into Database
     if ((pathname === '/api/db/sync' || pathname === '/api/sync') && (req.method === 'POST' || req.method === 'GET')) {
       try {
-        const syncedRows = await db.syncDatabaseFromGitHub(GITHUB_TOKEN);
+        const result = await db.getDeploymentsWithSync({ token: GITHUB_TOKEN, forceSync: true });
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
           success: true,
-          message: `Synchronized with GitHub into ${db.getActiveDbType()} successfully`,
-          count: syncedRows.length,
-          data: syncedRows
+          message: `Synchronized with GitHub into ${result.db_type} successfully`,
+          count: result.count,
+          data: result.data,
+          history: result.history
         }, null, 2));
       } catch (err) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -299,66 +298,58 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-  // GET /deployments.json or /api/deployments
-  if ((pathname === '/deployments.json' || pathname === '/api/deployments') && req.method === 'GET') {
-    let data = {};
-    const requestedMode = parsedUrl.searchParams.get('source');
-    const shouldFetchGitHub = requestedMode === 'github' || (requestedMode !== 'local' && Boolean(GITHUB_TOKEN && GITHUB_TOKEN.length > 5));
-
-    if (shouldFetchGitHub) {
+    // GET /deployments.json - Always backed by Database
+    if (pathname === '/deployments.json' && req.method === 'GET') {
       try {
-        data = await fetchDeploymentsGitHub();
+        const forceSync = parsedUrl.searchParams.get('sync') === 'true';
+        const result = await db.getDeploymentsWithSync({ token: GITHUB_TOKEN, forceSync });
+        const format = parsedUrl.searchParams.get('format');
+
+        if (format === 'db' || format === 'array') {
+          res.writeHead(200, {
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-cache, no-store, must-revalidate'
+          });
+          res.end(JSON.stringify(result.data, null, 2));
+          return;
+        }
+
+        const dict = {};
+        for (const row of (result.data || [])) {
+          dict[row.client_name] = {
+            client: row.client_name,
+            frontend_version: row.frontend_version,
+            backend_version: row.backend_version,
+            status: row.status,
+            deployed_by: row.deployed_by,
+            frontend_deployed_at: row.frontend_deployed_at,
+            backend_deployed_at: row.backend_deployed_at,
+            is_deployable_to_client: row.is_deployable_to_client,
+            current: {
+              version: row.frontend_version,
+              status: row.status,
+              deployed_by: row.deployed_by,
+              last_deployed_at: row.frontend_deployed_at,
+              run_id: row.frontend_run_id
+            }
+          };
+        }
+        dict._db_deployments = result.data;
+        dict._db_history = result.history;
+        dict._source = 'database';
+        dict._db_type = result.db_type;
+
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache, no-store, must-revalidate'
+        });
+        res.end(JSON.stringify(dict, null, 2));
       } catch (err) {
-        console.warn(`[GitHub Fetch Failed: ${err.message}] Falling back to local deployments.json`);
-        data = readDeploymentsLocal();
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: err.message }));
       }
-    } else {
-      data = readDeploymentsLocal();
-      if ((!data || Object.keys(data).length === 0) && GITHUB_TOKEN) {
-        try {
-          data = await fetchDeploymentsGitHub();
-        } catch (e) {}
-      }
-    }
-
-    const shouldNormalize = parsedUrl.searchParams.get('normalized') === 'true';
-    const isDbFormat = parsedUrl.searchParams.get('format') === 'db';
-
-    if (isDbFormat) {
-      const rows = await db.getAllDeployments();
-      res.writeHead(200, {
-        'Content-Type': 'application/json',
-        'Cache-Control': 'no-cache, no-store, must-revalidate'
-      });
-      res.end(JSON.stringify(rows, null, 2));
       return;
     }
-
-    const payload = shouldNormalize ? normalizeData(data) : data;
-    
-    // Enrich with database deployments list and is_deployable flags
-    try {
-      const dbRows = await db.getAllDeployments();
-      if (typeof payload === 'object' && !Array.isArray(payload)) {
-        payload._db_deployments = dbRows;
-        for (const row of dbRows) {
-          const clientKey = row.client_name.toLowerCase();
-          if (payload[clientKey]) {
-            if (row.stack === 'F') {
-              payload[clientKey].is_deployable_to_client = row.is_deployable_to_client;
-            }
-          }
-        }
-      }
-    } catch (e) {}
-
-    res.writeHead(200, {
-      'Content-Type': 'application/json',
-      'Cache-Control': 'no-cache, no-store, must-revalidate'
-    });
-    res.end(JSON.stringify(payload, null, 2));
-    return;
-  }
 
   // GET /api/deployments/:client
   if (pathname.startsWith('/api/deployments/') && req.method === 'GET') {

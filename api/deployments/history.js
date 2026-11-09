@@ -10,20 +10,18 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const clientFilter = req.query?.client;
-    let history = db.getMergedHistory(clientFilter);
-    if (!history || history.length === 0) {
-      try {
-        await db.syncDatabaseFromGitHub(process.env.GITHUB_TOKEN || '');
-        history = db.getMergedHistory(clientFilter);
-      } catch (e) {}
-    }
+    const client = req.query && req.query.client;
+    const history = await db.getDeploymentHistory(client);
+
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+
     return res.status(200).json({
       success: true,
-      count: history.length,
-      data: history
+      db_type: db.getActiveDbType(),
+      source: 'database',
+      count: history ? history.length : 0,
+      data: history || []
     });
   } catch (err) {
     res.setHeader('Content-Type', 'application/json');

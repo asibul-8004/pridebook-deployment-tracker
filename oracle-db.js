@@ -2,11 +2,15 @@
  * Pridebook Version Tracker - Oracle Database Adapter
  * Location: /home/asibul/Pridebook/deployment-tracker/oracle-db.js
  * 
- * Uses Oracle table: SA_DEPLOYMENT_TRACKER
- * Stores merged frontend and backend deployment info per client (no STACK column).
- * Primary Key: DEPLOYMENT_TRACKER_NO
+ * Tables:
+ * - Master: SA_DEPLOYMENT_TRACKER (Stores merged latest deployment status per client box)
+ * - Detail: SA_DEPLOYMENT_TRACKER_DTL (Stores chronological release history progression)
  * 
- * NOTE: The application does NOT execute any DDL / CREATE TABLE statements.
+ * Primary Keys:
+ * - Master: DEPLOYMENT_TRACKER_NO
+ * - Detail: DEPLOYMENT_TRACKER_DTL_NO (Foreign Key: DEPLOYMENT_TRACKER_NO)
+ * 
+ * NOTE: The application does NOT execute any DDL / CREATE TABLE statements on Oracle.
  * Table creation is managed separately via DBA / manual scripts.
  * 
  * Credentials read securely from process.env (.env):
@@ -24,6 +28,7 @@ oracledb.outFormat = oracledb.OUT_FORMAT_OBJECT;
 oracledb.autoCommit = true;
 
 const TABLE_NAME = process.env.ORACLE_TABLE_NAME || 'SA_DEPLOYMENT_TRACKER';
+const DTL_TABLE_NAME = process.env.ORACLE_DTL_TABLE_NAME || 'SA_DEPLOYMENT_TRACKER_DTL';
 
 let pool = null;
 
@@ -68,7 +73,7 @@ async function getConnection() {
 }
 
 /**
- * Fetch next sequence value or calculate MAX(DEPLOYMENT_TRACKER_NO) + 1
+ * Fetch next sequence value or calculate MAX(DEPLOYMENT_TRACKER_NO) + 1 for Master Table
  */
 async function getNextTrackerNo(conn) {
   try {
@@ -81,6 +86,29 @@ async function getNextTrackerNo(conn) {
   }
   try {
     const resMax = await conn.execute(`SELECT NVL(MAX(DEPLOYMENT_TRACKER_NO), 0) + 1 AS "next_no" FROM ${TABLE_NAME}`);
+    if (resMax.rows && resMax.rows[0]) {
+      return resMax.rows[0].next_no || resMax.rows[0].NEXT_NO;
+    }
+  } catch (err) {
+    // In case table does not exist yet
+  }
+  return 1;
+}
+
+/**
+ * Fetch next sequence value or calculate MAX(DEPLOYMENT_TRACKER_DTL_NO) + 1 for Detail Table
+ */
+async function getNextTrackerDtlNo(conn) {
+  try {
+    const resSeq = await conn.execute(`SELECT S_SA_DEPLOYMENT_TRACKER_DTL.NEXTVAL AS "next_no" FROM dual`);
+    if (resSeq.rows && resSeq.rows[0]) {
+      return resSeq.rows[0].next_no || resSeq.rows[0].NEXT_NO;
+    }
+  } catch (err) {
+    // Sequence not present, fallback to max + 1
+  }
+  try {
+    const resMax = await conn.execute(`SELECT NVL(MAX(DEPLOYMENT_TRACKER_DTL_NO), 0) + 1 AS "next_no" FROM ${DTL_TABLE_NAME}`);
     if (resMax.rows && resMax.rows[0]) {
       return resMax.rows[0].next_no || resMax.rows[0].NEXT_NO;
     }
@@ -155,8 +183,55 @@ async function getAllDeployments(filters = {}) {
 }
 
 /**
- * Upsert merged client deployment record into Oracle table SA_DEPLOYMENT_TRACKER
- * Preserves IS_DEPLOYABLE_TO_CLIENT on existing rows
+ * Get deployment history from child table SA_DEPLOYMENT_TRACKER_DTL
+ */
+async function getDeploymentHistory(clientFilter) {
+  const conn = await getConnection();
+  try {
+    let sql = `
+      SELECT 
+        dtl.DEPLOYMENT_TRACKER_DTL_NO AS "id",
+        dtl.DEPLOYMENT_TRACKER_DTL_NO AS "deployment_tracker_dtl_no",
+        dtl.DEPLOYMENT_TRACKER_NO AS "deployment_tracker_no",
+        dtl.CLIENT_NAME AS "client_name",
+        dtl.EVENT_STACK AS "event_stack",
+        dtl.FRONTEND_VERSION AS "frontend_version",
+        dtl.BACKEND_VERSION AS "backend_version",
+        dtl.STATUS AS "status",
+        dtl.DEPLOYED_BY AS "deployed_by",
+        dtl.FRONTEND_DEPLOYED_AT AS "frontend_deployed_at",
+        dtl.BACKEND_DEPLOYED_AT AS "backend_deployed_at",
+        dtl.RUN_ID AS "run_id",
+        dtl.EVENT_TIME AS "event_time",
+        NVL(m.IS_DEPLOYABLE_TO_CLIENT, 0) AS "is_deployable_to_client"
+      FROM ${DTL_TABLE_NAME} dtl
+      LEFT JOIN ${TABLE_NAME} m ON dtl.DEPLOYMENT_TRACKER_NO = m.DEPLOYMENT_TRACKER_NO
+      WHERE 1=1
+    `;
+    const binds = {};
+    if (clientFilter && clientFilter !== 'all') {
+      sql += ` AND LOWER(dtl.CLIENT_NAME) = LOWER(:clientFilter)`;
+      binds.clientFilter = clientFilter;
+    }
+    sql += ` ORDER BY dtl.EVENT_TIME DESC, dtl.DEPLOYMENT_TRACKER_DTL_NO DESC`;
+
+    const result = await conn.execute(sql, binds);
+    return result.rows || [];
+  } catch (err) {
+    if (err.message && err.message.includes('ORA-00942')) {
+      // Table SA_DEPLOYMENT_TRACKER_DTL does not exist yet
+      return null;
+    }
+    throw err;
+  } finally {
+    await conn.close();
+  }
+}
+
+/**
+ * Upsert merged client deployment record into Oracle table SA_DEPLOYMENT_TRACKER.
+ * If new client onboards, automatically inserts into SA_DEPLOYMENT_TRACKER.
+ * Returns the DEPLOYMENT_TRACKER_NO.
  */
 async function upsertDeployment(record) {
   const conn = await getConnection();
@@ -164,63 +239,201 @@ async function upsertDeployment(record) {
   const now = new Date().toISOString();
 
   try {
-    const nextNo = await getNextTrackerNo(conn);
+    const checkRes = await conn.execute(
+      `SELECT DEPLOYMENT_TRACKER_NO AS "tracker_no" FROM ${TABLE_NAME} WHERE LOWER(CLIENT_NAME) = LOWER(:client_name)`,
+      { client_name }
+    );
 
-    const mergeSql = `
-      MERGE INTO ${TABLE_NAME} cd
-      USING (SELECT :client_name AS client_name FROM dual) src
-      ON (LOWER(cd.CLIENT_NAME) = LOWER(src.client_name))
-      WHEN MATCHED THEN
-        UPDATE SET
-          cd.FRONTEND_VERSION = :frontend_version,
-          cd.BACKEND_VERSION = :backend_version,
-          cd.STATUS = :status,
-          cd.DEPLOYED_BY = :deployed_by,
-          cd.FRONTEND_DEPLOYED_AT = :frontend_deployed_at,
-          cd.BACKEND_DEPLOYED_AT = :backend_deployed_at,
-          cd.FRONTEND_RUN_ID = :frontend_run_id,
-          cd.BACKEND_RUN_ID = :backend_run_id,
-          cd.SYNCED_AT = :synced_at,
-          cd.UPDATED_AT = :synced_at,
-          cd.SS_MODIFIED_ON = :synced_at
-      WHEN NOT MATCHED THEN
-        INSERT (
-          DEPLOYMENT_TRACKER_NO, CLIENT_NAME, FRONTEND_VERSION, BACKEND_VERSION,
-          STATUS, DEPLOYED_BY, FRONTEND_DEPLOYED_AT, BACKEND_DEPLOYED_AT,
-          FRONTEND_RUN_ID, BACKEND_RUN_ID, IS_DEPLOYABLE_TO_CLIENT,
-          SYNCED_AT, UPDATED_AT, SS_CREATED_ON, SS_MODIFIED_ON, SS_IS_DELETED, SS_IS_UPLOADED
-        )
-        VALUES (
-          :deployment_tracker_no, :client_name, :frontend_version, :backend_version,
-          :status, :deployed_by, :frontend_deployed_at, :backend_deployed_at,
-          :frontend_run_id, :backend_run_id, 0,
-          :synced_at, :updated_at, :synced_at, :synced_at, 0, 0
-        )
-    `;
+    let trackerNo = null;
 
-    await conn.execute(mergeSql, {
-      deployment_tracker_no: nextNo,
-      client_name,
-      frontend_version: record.frontend_version || 'unknown',
-      backend_version: record.backend_version || 'unknown',
-      status: record.status || 'pending_first_deploy',
-      deployed_by: record.deployed_by || 'system',
-      frontend_deployed_at: record.frontend_deployed_at || null,
-      backend_deployed_at: record.backend_deployed_at || null,
-      frontend_run_id: record.frontend_run_id ? String(record.frontend_run_id) : null,
-      backend_run_id: record.backend_run_id ? String(record.backend_run_id) : null,
-      synced_at: now,
-      updated_at: now
-    });
+    if (checkRes.rows && checkRes.rows.length > 0) {
+      trackerNo = checkRes.rows[0].tracker_no || checkRes.rows[0].TRACKER_NO;
+      await conn.execute(
+        `UPDATE ${TABLE_NAME} SET
+           FRONTEND_VERSION = :frontend_version,
+           BACKEND_VERSION = :backend_version,
+           STATUS = :status,
+           DEPLOYED_BY = :deployed_by,
+           FRONTEND_DEPLOYED_AT = :frontend_deployed_at,
+           BACKEND_DEPLOYED_AT = :backend_deployed_at,
+           FRONTEND_RUN_ID = :frontend_run_id,
+           BACKEND_RUN_ID = :backend_run_id,
+           SYNCED_AT = :synced_at,
+           UPDATED_AT = :synced_at,
+           SS_MODIFIED_ON = :synced_at
+         WHERE DEPLOYMENT_TRACKER_NO = :trackerNo`,
+        {
+          trackerNo,
+          frontend_version: record.frontend_version || 'unknown',
+          backend_version: record.backend_version || 'unknown',
+          status: record.status || 'pending_first_deploy',
+          deployed_by: record.deployed_by || 'system',
+          frontend_deployed_at: record.frontend_deployed_at || null,
+          backend_deployed_at: record.backend_deployed_at || null,
+          frontend_run_id: record.frontend_run_id ? String(record.frontend_run_id) : null,
+          backend_run_id: record.backend_run_id ? String(record.backend_run_id) : null,
+          synced_at: now
+        }
+      );
+    } else {
+      // New client onboarded! Auto-add in main table
+      trackerNo = await getNextTrackerNo(conn);
+      await conn.execute(
+        `INSERT INTO ${TABLE_NAME} (
+           DEPLOYMENT_TRACKER_NO, CLIENT_NAME, FRONTEND_VERSION, BACKEND_VERSION,
+           STATUS, DEPLOYED_BY, FRONTEND_DEPLOYED_AT, BACKEND_DEPLOYED_AT,
+           FRONTEND_RUN_ID, BACKEND_RUN_ID, IS_DEPLOYABLE_TO_CLIENT,
+           SYNCED_AT, UPDATED_AT, SS_CREATED_ON, SS_MODIFIED_ON, SS_IS_DELETED, SS_IS_UPLOADED
+         ) VALUES (
+           :trackerNo, :client_name, :frontend_version, :backend_version,
+           :status, :deployed_by, :frontend_deployed_at, :backend_deployed_at,
+           :frontend_run_id, :backend_run_id, 0,
+           :synced_at, :synced_at, :synced_at, :synced_at, 0, 0
+         )`,
+        {
+          trackerNo,
+          client_name,
+          frontend_version: record.frontend_version || 'unknown',
+          backend_version: record.backend_version || 'unknown',
+          status: record.status || 'pending_first_deploy',
+          deployed_by: record.deployed_by || 'system',
+          frontend_deployed_at: record.frontend_deployed_at || null,
+          backend_deployed_at: record.backend_deployed_at || null,
+          frontend_run_id: record.frontend_run_id ? String(record.frontend_run_id) : null,
+          backend_run_id: record.backend_run_id ? String(record.backend_run_id) : null,
+          synced_at: now
+        }
+      );
+      console.log(`[Oracle Onboard] Auto-added new client "${client_name}" into ${TABLE_NAME} (ID: ${trackerNo})`);
+    }
+
+    return trackerNo;
   } catch (err) {
     if (err.message && err.message.includes('ORA-00942')) {
       console.warn(`[Oracle Notice] Table ${TABLE_NAME} does not exist yet. Please run the table creation DDL script.`);
-      return;
+      return null;
     }
     throw err;
   } finally {
     await conn.close();
   }
+}
+
+/**
+ * Synchronize history events into SA_DEPLOYMENT_TRACKER_DTL.
+ * Ensures client exists in main table, then inserts history records under dtl table.
+ */
+async function syncHistoryEvents(historyEvents) {
+  if (!historyEvents || historyEvents.length === 0) return 0;
+  const conn = await getConnection();
+  let inserted = 0;
+
+  try {
+    // Map existing tracker_nos
+    const masterRows = await conn.execute(`SELECT DEPLOYMENT_TRACKER_NO AS "no", LOWER(CLIENT_NAME) AS "name" FROM ${TABLE_NAME}`);
+    const clientTrackerMap = {};
+    for (const r of (masterRows.rows || [])) {
+      clientTrackerMap[r.name || r.NAME] = r.no || r.NO;
+    }
+
+    for (const ev of historyEvents) {
+      const client = String(ev.client_name).toLowerCase().trim();
+      let trackerNo = clientTrackerMap[client];
+
+      if (!trackerNo) {
+        // Auto-add client into main table first
+        trackerNo = await getNextTrackerNo(conn);
+        const now = new Date().toISOString();
+        await conn.execute(
+          `INSERT INTO ${TABLE_NAME} (
+             DEPLOYMENT_TRACKER_NO, CLIENT_NAME, FRONTEND_VERSION, BACKEND_VERSION,
+             STATUS, DEPLOYED_BY, FRONTEND_DEPLOYED_AT, BACKEND_DEPLOYED_AT,
+             FRONTEND_RUN_ID, BACKEND_RUN_ID, IS_DEPLOYABLE_TO_CLIENT,
+             SYNCED_AT, UPDATED_AT, SS_CREATED_ON, SS_MODIFIED_ON, SS_IS_DELETED, SS_IS_UPLOADED
+           ) VALUES (
+             :trackerNo, :client, :fVer, :bVer,
+             :status, :deployedBy, :fAt, :bAt,
+             :fRun, :bRun, 0,
+             :now, :now, :now, :now, 0, 0
+           )`,
+          {
+            trackerNo,
+            client,
+            fVer: ev.frontend_version || 'unknown',
+            bVer: ev.backend_version || 'unknown',
+            status: ev.status || 'success',
+            deployedBy: ev.deployed_by || 'system',
+            fAt: ev.frontend_deployed_at || null,
+            bAt: ev.backend_deployed_at || null,
+            fRun: ev.event_stack === 'F' ? String(ev.run_id || '') : null,
+            bRun: ev.event_stack === 'B' ? String(ev.run_id || '') : null,
+            now
+          }
+        );
+        clientTrackerMap[client] = trackerNo;
+        console.log(`[Oracle Onboard] Auto-added client "${client}" to ${TABLE_NAME} for history sync (ID: ${trackerNo})`);
+      }
+
+      // Check if this history entry is already in DTL
+      const eventTime = ev.event_time || ev.timestamp || '';
+      const eventStack = ev.event_stack || ev.stack || 'F';
+      const runId = ev.run_id ? String(ev.run_id) : null;
+
+      let checkSql = `SELECT COUNT(*) AS "cnt" FROM ${DTL_TABLE_NAME} WHERE DEPLOYMENT_TRACKER_NO = :trackerNo AND EVENT_STACK = :eventStack AND EVENT_TIME = :eventTime`;
+      let binds = { trackerNo, eventStack, eventTime };
+
+      if (runId) {
+        checkSql = `SELECT COUNT(*) AS "cnt" FROM ${DTL_TABLE_NAME} WHERE DEPLOYMENT_TRACKER_NO = :trackerNo AND EVENT_STACK = :eventStack AND (RUN_ID = :runId OR EVENT_TIME = :eventTime)`;
+        binds.runId = runId;
+      }
+
+      const checkRes = await conn.execute(checkSql, binds);
+      const exists = (checkRes.rows && checkRes.rows[0]) ? (checkRes.rows[0].cnt || checkRes.rows[0].CNT || 0) : 0;
+
+      if (exists === 0) {
+        const dtlNo = await getNextTrackerDtlNo(conn);
+        const now = new Date().toISOString();
+        await conn.execute(
+          `INSERT INTO ${DTL_TABLE_NAME} (
+             DEPLOYMENT_TRACKER_DTL_NO, DEPLOYMENT_TRACKER_NO, CLIENT_NAME,
+             EVENT_STACK, FRONTEND_VERSION, BACKEND_VERSION, STATUS,
+             DEPLOYED_BY, FRONTEND_DEPLOYED_AT, BACKEND_DEPLOYED_AT,
+             RUN_ID, EVENT_TIME, SS_CREATED_ON, SS_MODIFIED_ON, SS_IS_DELETED, SS_IS_UPLOADED
+           ) VALUES (
+             :dtlNo, :trackerNo, :client,
+             :eventStack, :fVer, :bVer, :status,
+             :deployedBy, :fAt, :bAt,
+             :runId, :eventTime, :now, :now, 0, 0
+           )`,
+          {
+            dtlNo,
+            trackerNo,
+            client,
+            eventStack,
+            fVer: ev.frontend_version || 'unknown',
+            bVer: ev.backend_version || 'unknown',
+            status: ev.status || 'success',
+            deployedBy: ev.deployed_by || 'system',
+            fAt: ev.frontend_deployed_at || null,
+            bAt: ev.backend_deployed_at || null,
+            runId,
+            eventTime,
+            now
+          }
+        );
+        inserted++;
+      }
+    }
+  } catch (err) {
+    if (err.message && err.message.includes('ORA-00942')) {
+      // DTL table not created yet in Oracle
+      return 0;
+    }
+    throw err;
+  } finally {
+    await conn.close();
+  }
+  return inserted;
 }
 
 /**
@@ -322,9 +535,12 @@ module.exports = {
   getPool,
   getConnection,
   getAllDeployments,
+  getDeploymentHistory,
   upsertDeployment,
+  syncHistoryEvents,
   updateDeployableFlag,
   closePool,
   getConnectString,
-  TABLE_NAME
+  TABLE_NAME,
+  DTL_TABLE_NAME
 };

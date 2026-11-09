@@ -1004,8 +1004,8 @@
             <circle cx="12" cy="12" r="10"></circle>
             <polyline points="12 6 12 12 16 14"></polyline>
           </svg>
-          <span>Stage Deployment History (Last 50)</span>
-          <span class="tab-badge" id="stageHistoryCountBadge">0</span>
+          <span>Deployment History</span>
+          <span class="tab-badge" id="historyCountBadge">0</span>
         </button>
       </div>
 
@@ -1134,7 +1134,6 @@
               <th>Client Box</th>
               <th>Status</th>
               <th>Current Version</th>
-              <th>Previous Version</th>
               <th>Deployed By</th>
               <th>Last Deployed At</th>
               <th>GitHub Run ID</th>
@@ -1156,11 +1155,11 @@
 
 
     <!-- ========================================== -->
-    <!-- TAB 2: STAGE DEPLOYMENT HISTORY (LAST 50)  -->
+    <!-- TAB 2: DEPLOYMENT HISTORY (ALL CLIENTS)    -->
     <!-- ========================================== -->
     <section class="tab-pane" id="tab2">
       
-      <!-- Stage Hero Banner -->
+      <!-- History Hero Banner -->
       <div class="stage-hero-banner">
         <div class="stage-hero-details">
           <h2>
@@ -1168,63 +1167,73 @@
               <polyline points="16 18 22 12 16 6"></polyline>
               <polyline points="8 6 2 12 8 18"></polyline>
             </svg>
-            Stage Environment Release Log
+            <span id="historyHeroTitle">Client Deployment History</span>
           </h2>
-          <p id="stageHeroSubtext">Loading stage deployment records from GitHub...</p>
+          <p id="historyHeroSubtext">Loading deployment records from GitHub...</p>
         </div>
 
         <div class="stage-hero-stat">
           <div class="stage-pill-box">
-            <div class="tag">Active Version</div>
-            <div class="number" id="stageHeroActiveVer">--</div>
+            <div class="tag">Selected Client</div>
+            <div class="number" id="historyHeroActiveClient" style="font-size: 1.1rem;">ALL</div>
           </div>
           <div class="stage-pill-box">
-            <div class="tag">History Records</div>
-            <div class="number" id="stageHeroHistoryCount">0 / 50</div>
+            <div class="tag">Active Version</div>
+            <div class="number" id="historyHeroActiveVer">--</div>
+          </div>
+          <div class="stage-pill-box">
+            <div class="tag">Total Records</div>
+            <div class="number" id="historyHeroHistoryCount">0</div>
           </div>
         </div>
       </div>
 
-      <!-- Toolbar for Stage History -->
+      <!-- Toolbar for History -->
       <div class="toolbar-bar">
+        <!-- Client Filter Buttons: All, Stage, Shinshin, etc. -->
+        <div class="filter-group" id="historyClientFilterGroup">
+          <!-- Dynamically populated buttons -->
+        </div>
+
         <div class="search-box">
           <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="11" cy="11" r="8"></circle>
             <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
           </svg>
-          <input type="text" id="stageSearchInput" placeholder="Filter stage history by version tag, user, or run ID..." oninput="handleStageFilterChange()" />
+          <input type="text" id="historySearchInput" placeholder="Filter history by client, version, user, or run ID..." oninput="handleHistoryFilterChange()" />
         </div>
       </div>
 
-      <!-- Stage History Table -->
+      <!-- History Table -->
       <div class="table-responsive">
         <table>
           <thead>
             <tr>
               <th style="width: 50px;">#</th>
+              <th>Client Box</th>
               <th>Version Tag</th>
               <th>Status</th>
               <th>Deployed At</th>
               <th>Deployed By</th>
               <th>GitHub Run ID</th>
-              <th>Release Notes</th>
+              <th>Actions</th>
             </tr>
           </thead>
-          <tbody id="stageHistoryTableBody">
-            <!-- Rendered dynamically from stage.history -->
+          <tbody id="historyTableBody">
+            <!-- Rendered dynamically -->
           </tbody>
         </table>
       </div>
 
-      <!-- Empty state if stage history has no entries yet -->
-      <div class="empty-state" id="stageEmptyState" style="display: none;">
+      <!-- Empty state if history has no entries -->
+      <div class="empty-state" id="historyEmptyState" style="display: none;">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="10"></circle>
           <line x1="12" y1="8" x2="12" y2="12"></line>
           <line x1="12" y1="16" x2="12.01" y2="16"></line>
         </svg>
-        <h3>No Prior Stage History Yet</h3>
-        <p>The current stage version is active. Historical records will automatically populate here as releases deploy through GitHub Actions.</p>
+        <h3 id="historyEmptyTitle">No Deployment History Found</h3>
+        <p id="historyEmptyText">Historical records will automatically populate here as client deployments deploy through GitHub Actions.</p>
       </div>
 
     </section>
@@ -1244,7 +1253,9 @@
       clientView: 'table', // By default in list/table mode
       clientStatusFilter: 'all',
       clientSearchTerm: '',
-      stageSearchTerm: ''
+      historySelectedClient: 'all',
+      historySearchTerm: '',
+      githubRepo: 'pride-erp-local/pride-erp-frontend'
     };
 
     let rawData = {};
@@ -1383,7 +1394,8 @@
       normalizedClients = normalizeData(rawData);
       renderMetrics();
       renderTab1Clients();
-      renderTab2StageHistory();
+      renderHistoryClientFilterButtons();
+      renderTab2History();
     }
 
     // Render Metrics
@@ -1506,7 +1518,6 @@
     // Default View: Table / List Row
     function renderClientTableRow(c) {
       const isUnknown = !c.current.version || c.current.version === 'unknown';
-      const prevVer = c.previous?.version || (c.isStage ? 'None' : 'N/A');
       const initials = getInitials(c.id);
 
       const runLink = c.current.run_id 
@@ -1532,7 +1543,6 @@
             <span class="table-ver">${escapeHtml(c.current.version)}</span>
             ${!isUnknown ? `<button class="btn-copy" style="margin-left:6px;" onclick="copyText('${escapeHtml(c.current.version)}')">copy</button>` : ''}
           </td>
-          <td><span class="table-ver" style="color:var(--text-muted); font-size:0.85rem;">${escapeHtml(prevVer)}</span></td>
           <td><strong>${escapeHtml(c.current.deployed_by || '-')}</strong></td>
           <td>
             ${formatDateTime(c.current.last_deployed_at)}
@@ -1540,15 +1550,9 @@
           </td>
           <td>${runLink}</td>
           <td>
-            ${c.isStage ? `
-              <button class="btn btn-primary" style="padding: 4px 10px; font-size: 0.78rem;" onclick="switchTab('tab2')">
-                View History (${c.history.length})
-              </button>
-            ` : `
-              <button class="btn" style="padding: 4px 10px; font-size: 0.78rem;" onclick="copyText('${escapeHtml(c.id)}: ${escapeHtml(c.current.version)}')">
-                Copy
-              </button>
-            `}
+            <button class="btn btn-primary" style="padding: 4px 10px; font-size: 0.78rem;" onclick="viewClientHistory('${escapeHtml(c.id)}')">
+              View History (${c.history ? c.history.length : 0})
+            </button>
           </td>
         </tr>
       `;
@@ -1558,7 +1562,6 @@
     function renderClientCard(c) {
       const initials = getInitials(c.id);
       const isUnknown = !c.current.version || c.current.version === 'unknown';
-      const prevVer = c.previous?.version || (c.isStage ? 'None' : 'N/A');
 
       const runLink = c.current.run_id 
         ? `<a href="https://github.com/${config.githubRepo}/actions/runs/${c.current.run_id}" target="_blank" rel="noopener noreferrer">
@@ -1596,10 +1599,6 @@
 
             <div class="meta-list">
               <div class="meta-item">
-                <span class="meta-label">Previous Release</span>
-                <span class="meta-value">${escapeHtml(prevVer)}</span>
-              </div>
-              <div class="meta-item">
                 <span class="meta-label">Deployed By</span>
                 <span class="meta-value">${escapeHtml(c.current.deployed_by || '-')}</span>
               </div>
@@ -1618,17 +1617,10 @@
           </div>
 
           <div class="card-footer">
-            ${c.isStage ? `
-              <button class="btn btn-primary" onclick="switchTab('tab2')">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-                View 50 Version History &rarr;
-              </button>
-            ` : `
-              <button class="btn" onclick="copyText('${escapeHtml(c.id)}: ${escapeHtml(c.current.version)}')">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                Copy Status
-              </button>
-            `}
+            <button class="btn btn-primary" onclick="viewClientHistory('${escapeHtml(c.id)}')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+              View History (${c.history ? c.history.length : 0}) &rarr;
+            </button>
           </div>
         </div>
       `;
@@ -1664,39 +1656,154 @@
     }
 
     // ==========================================
-    // TAB 2: STAGE DEPLOYMENT HISTORY (REAL DATA)
+    // TAB 2: DEPLOYMENT HISTORY (ALL CLIENTS)
     // ==========================================
-    function renderTab2StageHistory() {
-      const stage = normalizedClients.find(c => c.isStage);
-      const stageTableBody = document.getElementById('stageHistoryTableBody');
-      const emptyState = document.getElementById('stageEmptyState');
-      const heroSubtext = document.getElementById('stageHeroSubtext');
-      const heroActiveVer = document.getElementById('stageHeroActiveVer');
-      const heroHistoryCount = document.getElementById('stageHeroHistoryCount');
-      const badgeCount = document.getElementById('stageHistoryCountBadge');
+    function viewClientHistory(clientId) {
+      config.historySelectedClient = (clientId || 'all').toLowerCase();
+      switchTab('tab2');
+      renderHistoryClientFilterButtons();
+      renderTab2History();
+    }
 
-      if (!stage) {
-        heroSubtext.innerText = 'Stage environment not registered in deployments.json';
-        stageTableBody.innerHTML = '';
-        emptyState.style.display = 'block';
-        return;
+    function setHistoryClientFilter(clientId) {
+      config.historySelectedClient = (clientId || 'all').toLowerCase();
+      renderHistoryClientFilterButtons();
+      renderTab2History();
+    }
+
+    function renderHistoryClientFilterButtons() {
+      const container = document.getElementById('historyClientFilterGroup');
+      if (!container) return;
+
+      let totalAll = 0;
+      const clientStats = {};
+
+      normalizedClients.forEach(c => {
+        let count = 0;
+        if (c.current && c.current.version && c.current.version !== 'unknown') count++;
+        if (Array.isArray(c.history)) count += c.history.length;
+        clientStats[c.id.toLowerCase()] = count;
+        totalAll += count;
+      });
+
+      let html = `
+        <button class="filter-btn ${config.historySelectedClient === 'all' ? 'active' : ''}" 
+                onclick="setHistoryClientFilter('all')">
+          All Clients (${totalAll})
+        </button>
+      `;
+
+      normalizedClients.forEach(c => {
+        const idLower = c.id.toLowerCase();
+        const count = clientStats[idLower] || 0;
+        const isActive = config.historySelectedClient === idLower;
+        html += `
+          <button class="filter-btn ${isActive ? 'active' : ''}" 
+                  onclick="setHistoryClientFilter('${escapeHtml(c.id)}')">
+            ${escapeHtml(c.name)} (${count})
+          </button>
+        `;
+      });
+
+      container.innerHTML = html;
+    }
+
+    function getAllHistoryEntries() {
+      const entries = [];
+
+      normalizedClients.forEach(c => {
+        const idLower = c.id.toLowerCase();
+        if (config.historySelectedClient !== 'all' && idLower !== config.historySelectedClient) {
+          return;
+        }
+
+        // Current deployed version (if valid)
+        if (c.current && c.current.version && c.current.version !== 'unknown') {
+          entries.push({
+            clientId: c.id,
+            clientName: c.name,
+            isStage: c.isStage,
+            version: c.current.version,
+            status: c.current.status,
+            last_deployed_at: c.current.last_deployed_at,
+            deployed_by: c.current.deployed_by,
+            run_id: c.current.run_id,
+            isCurrent: true
+          });
+        }
+
+        // Historical deployments
+        if (Array.isArray(c.history)) {
+          c.history.forEach(h => {
+            const isDup = c.current && c.current.version === h.version && (c.current.run_id ? c.current.run_id === h.run_id : true);
+            if (!isDup) {
+              entries.push({
+                clientId: c.id,
+                clientName: c.name,
+                isStage: c.isStage,
+                version: h.version,
+                status: h.status,
+                last_deployed_at: h.last_deployed_at,
+                deployed_by: h.deployed_by,
+                run_id: h.run_id,
+                isCurrent: false
+              });
+            }
+          });
+        }
+      });
+
+      // Sort by deployment timestamp descending (newest first)
+      entries.sort((a, b) => {
+        const timeA = a.last_deployed_at ? new Date(a.last_deployed_at).getTime() : 0;
+        const timeB = b.last_deployed_at ? new Date(b.last_deployed_at).getTime() : 0;
+        return timeB - timeA;
+      });
+
+      return entries;
+    }
+
+    function renderTab2History() {
+      const historyTableBody = document.getElementById('historyTableBody');
+      const emptyState = document.getElementById('historyEmptyState');
+      const emptyTitle = document.getElementById('historyEmptyTitle');
+      const emptyText = document.getElementById('historyEmptyText');
+      const heroTitle = document.getElementById('historyHeroTitle');
+      const heroSubtext = document.getElementById('historyHeroSubtext');
+      const heroActiveClient = document.getElementById('historyHeroActiveClient');
+      const heroActiveVer = document.getElementById('historyHeroActiveVer');
+      const heroHistoryCount = document.getElementById('historyHeroHistoryCount');
+      const badgeCount = document.getElementById('historyCountBadge');
+
+      const allEntries = getAllHistoryEntries();
+
+      // Update hero banner based on selected client
+      if (config.historySelectedClient === 'all') {
+        heroTitle.innerText = 'All Clients Deployment History';
+        heroActiveClient.innerText = 'ALL';
+        const activeStage = normalizedClients.find(c => c.isStage);
+        heroActiveVer.innerText = (activeStage && activeStage.current.version) ? activeStage.current.version : '--';
+        heroSubtext.innerText = `Unified timeline of release deployments across all ${normalizedClients.length} target client boxes`;
+      } else {
+        const selected = normalizedClients.find(c => c.id.toLowerCase() === config.historySelectedClient);
+        const name = selected ? selected.name : config.historySelectedClient.toUpperCase();
+        heroTitle.innerText = `${name} Deployment History`;
+        heroActiveClient.innerText = name;
+        heroActiveVer.innerText = (selected && selected.current && selected.current.version) ? selected.current.version : '--';
+        heroSubtext.innerText = selected && selected.current && selected.current.last_deployed_at
+          ? `Current release deployed by ${selected.current.deployed_by || 'system'} at ${formatDateTime(selected.current.last_deployed_at)}`
+          : `Release history for target client box ${name}`;
       }
 
-      const activeVer = stage.current.version || 'unknown';
-      heroActiveVer.innerText = activeVer;
-      heroSubtext.innerText = `Active release deployed by ${stage.current.deployed_by || 'system'} at ${formatDateTime(stage.current.last_deployed_at)}`;
-
-      // Strictly real history from deployments.json (max 50)
-      let historyList = (stage.history || []).slice(0, 50);
-
-      heroHistoryCount.innerText = `${historyList.length} / 50`;
-      badgeCount.innerText = historyList.length;
+      heroHistoryCount.innerText = allEntries.length;
+      if (badgeCount) badgeCount.innerText = allEntries.length;
 
       // Filter by search query
-      let filtered = historyList;
-      if (config.stageSearchTerm) {
-        const q = config.stageSearchTerm.toLowerCase();
-        filtered = filtered.filter(item => 
+      let filtered = allEntries;
+      if (config.historySearchTerm) {
+        const q = config.historySearchTerm.toLowerCase();
+        filtered = filtered.filter(item =>
+          (item.clientId || '').toLowerCase().includes(q) ||
           (item.version || '').toLowerCase().includes(q) ||
           (item.deployed_by || '').toLowerCase().includes(q) ||
           (item.run_id || '').toLowerCase().includes(q)
@@ -1704,22 +1811,32 @@
       }
 
       if (filtered.length === 0) {
-        stageTableBody.innerHTML = '';
-        emptyState.style.display = historyList.length === 0 ? 'block' : 'none';
-        if (historyList.length > 0) {
-          stageTableBody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding: 24px; color:var(--text-muted)">No matching records found for "${escapeHtml(config.stageSearchTerm)}"</td></tr>`;
+        historyTableBody.innerHTML = '';
+        emptyState.style.display = allEntries.length === 0 ? 'block' : 'none';
+        if (allEntries.length === 0) {
+          if (config.historySelectedClient === 'all') {
+            emptyTitle.innerText = 'No Deployment History Recorded Yet';
+            emptyText.innerText = 'Deployments from GitHub Actions will automatically stream here.';
+          } else {
+            emptyTitle.innerText = `No History Recorded for ${heroActiveClient.innerText}`;
+            emptyText.innerText = `Target box ${heroActiveClient.innerText} has not deployed any historical releases yet.`;
+          }
+        } else {
+          historyTableBody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding: 32px; color:var(--text-muted)">No matching records found for "${escapeHtml(config.historySearchTerm)}"</td></tr>`;
         }
         return;
       }
 
       emptyState.style.display = 'none';
 
-      stageTableBody.innerHTML = filtered.map((item, idx) => {
+      historyTableBody.innerHTML = filtered.map((item, idx) => {
+        const initials = getInitials(item.clientId);
         const runLink = item.run_id 
-          ? `<a href="https://github.com/${config.githubRepo}/actions/runs/${item.run_id}" target="_blank" rel="noopener noreferrer" style="color:var(--brand-primary); text-decoration:none;">
+          ? `<a href="https://github.com/${config.githubRepo}/actions/runs/${item.run_id}" target="_blank" rel="noopener noreferrer" style="color:var(--brand-primary); text-decoration:none; display:inline-flex; align-items:center; gap:4px;">
                #${item.run_id}
+               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
              </a>`
-          : '-';
+          : '<span style="color:var(--text-muted)">-</span>';
 
         const releaseLink = item.version && item.version.startsWith('v')
           ? `<a href="https://github.com/${config.githubRepo}/releases/tag/${item.version}" target="_blank" rel="noopener noreferrer" style="color:var(--brand-primary); text-decoration:none;">Release Notes &rarr;</a>`
@@ -1729,8 +1846,20 @@
           <tr>
             <td style="color:var(--text-muted); font-size: 0.8rem; font-family: monospace;">#${idx + 1}</td>
             <td>
-              <span class="table-ver" style="font-size: 0.95rem;">${escapeHtml(item.version)}</span>
-              <button class="btn-copy" style="margin-left: 6px; padding: 2px 6px;" onclick="copyText('${escapeHtml(item.version)}')">copy</button>
+              <div class="client-cell" style="cursor: pointer;" onclick="setHistoryClientFilter('${escapeHtml(item.clientId)}')">
+                <div class="client-avatar-sm">${initials}</div>
+                <div>
+                  <strong>${escapeHtml(item.clientId)}</strong>
+                  ${item.isStage ? '<span class="badge-sub" style="margin-left:6px;">Stage</span>' : '<span style="font-size:0.75rem; color:var(--text-muted); margin-left:6px;">tenant</span>'}
+                </div>
+              </div>
+            </td>
+            <td>
+              <div style="display:flex; align-items:center; gap:6px;">
+                <span class="table-ver" style="font-size: 0.95rem;">${escapeHtml(item.version)}</span>
+                ${item.isCurrent ? '<span class="status-badge success" style="padding: 2px 6px; font-size: 0.7rem;">Active</span>' : ''}
+                <button class="btn-copy" style="padding: 2px 6px;" onclick="copyText('${escapeHtml(item.version)}')">copy</button>
+              </div>
             </td>
             <td>${getStatusBadge(item.status)}</td>
             <td>
@@ -1745,9 +1874,9 @@
       }).join('');
     }
 
-    function handleStageFilterChange() {
-      config.stageSearchTerm = document.getElementById('stageSearchInput').value.trim();
-      renderTab2StageHistory();
+    function handleHistoryFilterChange() {
+      config.historySearchTerm = document.getElementById('historySearchInput').value.trim();
+      renderTab2History();
     }
 
     // Auto-refresh interval

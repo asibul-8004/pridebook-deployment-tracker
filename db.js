@@ -63,8 +63,14 @@ const inMemoryStore = new Map();
 let lastSyncCheckTime = 0;
 
 function isOracleConfigured() {
+  const host = (process.env.ORACLE_HOST || '').trim();
+  const isPrivateIp = host.startsWith('192.168.') || host.startsWith('10.') || host.startsWith('127.') || host === 'localhost';
+  if ((process.env.VERCEL || process.env.NOW_REGION) && isPrivateIp) {
+    // Vercel serverless environment in cloud cannot route to private intranet LAN IPs
+    return false;
+  }
   const dbType = (process.env.DB_TYPE || '').toLowerCase();
-  return dbType === 'oracle' && Boolean(process.env.ORACLE_HOST);
+  return dbType === 'oracle' && Boolean(host);
 }
 
 function getOracleModule() {

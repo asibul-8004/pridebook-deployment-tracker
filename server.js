@@ -9,6 +9,7 @@ const http = require('http');
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
+const db = require('./db');
 
 const rootDir = __dirname;
 
@@ -158,8 +159,97 @@ const server = http.createServer(async (req, res) => {
       sourceMode: Boolean(GITHUB_TOKEN && GITHUB_TOKEN.length > 5) ? 'github' : SOURCE_MODE,
       githubRepo: GITHUB_REPO,
       githubBranch: GITHUB_BRANCH,
-      hasServerToken: Boolean(GITHUB_TOKEN && GITHUB_TOKEN.length > 5)
+      hasServerToken: Boolean(GITHUB_TOKEN && GITHUB_TOKEN.length > 5),
+      dbPath: db.DB_PATH
     }, null, 2));
+    return;
+  }
+
+  // GET /api/db/deployments - Query database records (with optional sync & stack filters)
+  if (pathname === '/api/db/deployments' && req.method === 'GET') {
+    const shouldSync = parsedUrl.searchParams.get('sync') === 'true';
+    const stackFilter = parsedUrl.searchParams.get('stack'); // 'F' or 'B'
+    const clientFilter = parsedUrl.searchParams.get('client');
+
+    let rows = db.getAllDeployments({ stack: stackFilter, client_name: clientFilter });
+
+    if (shouldSync || rows.length === 0) {
+      try {
+        await db.syncDatabaseFromGitHub(GITHUB_TOKEN);
+        rows = db.getAllDeployments({ stack: stackFilter, client_name: clientFilter });
+      } catch (err) {
+        console.warn('[DB Sync Warn]:', err.message);
+      }
+    }
+
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-cache, no-store, must-revalidate'
+    });
+    res.end(JSON.stringify({
+      success: true,
+      count: rows.length,
+      deployable_count: rows.filter(r => r.is_deployable_to_client === 0).length,
+      issue_count: rows.filter(r => r.is_deployable_to_client === 1).length,
+      data: rows
+    }, null, 2));
+    return;
+  }
+
+  // POST or GET /api/db/sync - Trigger synchronization with GitHub
+  if ((pathname === '/api/db/sync' || pathname === '/api/sync') && (req.method === 'POST' || req.method === 'GET')) {
+    try {
+      const syncedRows = await db.syncDatabaseFromGitHub(GITHUB_TOKEN);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        success: true,
+        message: 'Synchronized with GitHub repositories successfully',
+        count: syncedRows.length,
+        data: syncedRows
+      }, null, 2));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: err.message }));
+    }
+    return;
+  }
+
+  // POST /api/deployments/toggle-deployable - Update is_deployable_to_client flag (0 or 1)
+  if ((pathname === '/api/deployments/toggle-deployable' || pathname === '/api/deployable') && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const payload = JSON.parse(body || '{}');
+        const { id, client_name, client, stack, is_deployable_to_client, is_deployable } = payload;
+        const targetClient = client_name || client;
+        const rawFlag = is_deployable_to_client !== undefined ? is_deployable_to_client : is_deployable;
+        const flagVal = parseInt(rawFlag, 10) === 1 ? 1 : 0;
+
+        let record = null;
+        if (id) {
+          record = db.updateDeployableFlag(id, flagVal);
+        } else if (targetClient && stack) {
+          record = db.updateDeployableFlag(targetClient, stack, flagVal);
+        } else {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'id or (client_name and stack) required' }));
+          return;
+        }
+
+        console.log(`[DB Updated] ${record.client_name} [${record.stack}]: is_deployable_to_client = ${flagVal} (${flagVal === 0 ? 'Deployable' : 'Has Issue'})`);
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: true,
+          message: flagVal === 0 ? 'Marked as Deployable (0)' : 'Marked as Has Issue / Not Deployable (1)',
+          record
+        }));
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid JSON payload: ' + err.message }));
+      }
+    });
     return;
   }
 
@@ -186,11 +276,41 @@ const server = http.createServer(async (req, res) => {
     }
 
     const shouldNormalize = parsedUrl.searchParams.get('normalized') === 'true';
+    const isDbFormat = parsedUrl.searchParams.get('format') === 'db';
+
+    if (isDbFormat) {
+      const rows = db.getAllDeployments();
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache, no-store, must-revalidate'
+      });
+      res.end(JSON.stringify(rows, null, 2));
+      return;
+    }
+
+    const payload = shouldNormalize ? normalizeData(data) : data;
+    
+    // Enrich with database deployments list and is_deployable flags
+    try {
+      const dbRows = db.getAllDeployments();
+      if (typeof payload === 'object' && !Array.isArray(payload)) {
+        payload._db_deployments = dbRows;
+        for (const row of dbRows) {
+          const clientKey = row.client_name.toLowerCase();
+          if (payload[clientKey]) {
+            if (row.stack === 'F') {
+              payload[clientKey].is_deployable_to_client = row.is_deployable_to_client;
+            }
+          }
+        }
+      }
+    } catch (e) {}
+
     res.writeHead(200, {
       'Content-Type': 'application/json',
       'Cache-Control': 'no-cache, no-store, must-revalidate'
     });
-    res.end(JSON.stringify(shouldNormalize ? normalizeData(data) : data, null, 2));
+    res.end(JSON.stringify(payload, null, 2));
     return;
   }
 
@@ -292,6 +412,12 @@ server.listen(PORT, () => {
   console.log(`  Mode       : ${SOURCE_MODE.toUpperCase()}`);
   console.log(`  Dashboard  : http://localhost:${PORT}`);
   console.log(`  Config API : http://localhost:${PORT}/api/config`);
+  console.log(`  DB API     : http://localhost:${PORT}/api/db/deployments`);
   console.log(`  Deployments: http://localhost:${PORT}/deployments.json`);
   console.log(`=======================================================`);
+
+  // Background sync from GitHub into DB table on server start
+  db.syncDatabaseFromGitHub(GITHUB_TOKEN)
+    .then(rows => console.log(`[DB] Startup sync completed: ${rows.length} records in SQLite DB.`))
+    .catch(err => console.warn(`[DB] Startup sync warn: ${err.message}`));
 });

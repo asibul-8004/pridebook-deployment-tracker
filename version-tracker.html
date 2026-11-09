@@ -487,7 +487,7 @@
       display: flex;
     }
 
-    /* Badges */
+    /* Status Badges */
     .status-badge {
       display: inline-flex;
       align-items: center;
@@ -498,6 +498,76 @@
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.04em;
+      white-space: nowrap;
+    }
+
+    /* Stack Badges (F for Frontend, B for Backend) */
+    .stack-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 9px;
+      border-radius: 6px;
+      font-size: 0.76rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      white-space: nowrap;
+    }
+    .stack-badge.stack-f {
+      background: rgba(59, 130, 246, 0.15);
+      color: #60a5fa;
+      border: 1px solid rgba(59, 130, 246, 0.35);
+    }
+    .stack-badge.stack-b {
+      background: rgba(168, 85, 247, 0.15);
+      color: #c084fc;
+      border: 1px solid rgba(168, 85, 247, 0.35);
+    }
+
+    /* Deployable to Client Toggle Widget */
+    .deployable-toggle-cell {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .deployable-checkbox {
+      width: 17px;
+      height: 17px;
+      cursor: pointer;
+      accent-color: #ef4444; /* Checked indicates Issue (1) */
+      vertical-align: middle;
+      border-radius: 4px;
+    }
+    .deployable-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 9px;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      cursor: pointer;
+      user-select: none;
+      transition: all var(--transition-speed);
+    }
+    .deployable-pill.ok {
+      background: rgba(16, 185, 129, 0.15);
+      color: #10b981;
+      border: 1px solid rgba(16, 185, 129, 0.35);
+    }
+    .deployable-pill.ok:hover {
+      background: rgba(16, 185, 129, 0.28);
+      transform: scale(1.02);
+    }
+    .deployable-pill.issue {
+      background: rgba(239, 68, 68, 0.15);
+      color: #ef4444;
+      border: 1px solid rgba(239, 68, 68, 0.4);
+    }
+    .deployable-pill.issue:hover {
+      background: rgba(239, 68, 68, 0.28);
+      transform: scale(1.02);
+    }
       white-space: nowrap;
     }
 
@@ -1037,34 +1107,33 @@
           </div>
           <div class="stat-details">
             <div class="stat-val" id="statTotalClients">0</div>
-            <div class="stat-lbl">Target Boxes / Clients</div>
+            <div class="stat-lbl">Client Stacks (DB)</div>
           </div>
         </div>
 
         <div class="stat-card">
           <div class="stat-icon green">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-              <polyline points="22 4 12 14.01 9 11.01"></polyline>
+              <polyline points="20 6 9 17 4 12"></polyline>
             </svg>
           </div>
           <div class="stat-details">
-            <div class="stat-val" id="statSuccessCount">0</div>
-            <div class="stat-lbl">Active / Deployed</div>
+            <div class="stat-val" id="statDeployableCount" style="color: #10b981;">0</div>
+            <div class="stat-lbl">Deployable to Client (0)</div>
           </div>
         </div>
 
         <div class="stat-card">
           <div class="stat-icon orange">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="10"></circle>
-              <line x1="12" y1="8" x2="12" y2="12"></line>
-              <line x1="12" y1="16" x2="12.01" y2="16"></line>
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+              <line x1="12" y1="9" x2="12" y2="13"></line>
+              <line x1="12" y1="17" x2="12.01" y2="17"></line>
             </svg>
           </div>
           <div class="stat-details">
-            <div class="stat-val" id="statPendingCount">0</div>
-            <div class="stat-lbl">Pending First Deploy</div>
+            <div class="stat-val" id="statIssueCount" style="color: #ef4444;">0</div>
+            <div class="stat-lbl">Has Issue / Blocked (1)</div>
           </div>
         </div>
 
@@ -1078,8 +1147,8 @@
             </svg>
           </div>
           <div class="stat-details">
-            <div class="stat-val" id="statStageVersion">--</div>
-            <div class="stat-lbl">Current Stage Release</div>
+            <div class="stat-val" id="statStageVersion" style="font-size: 1.05rem;">--</div>
+            <div class="stat-lbl">Stage Releases (F / B)</div>
           </div>
         </div>
       </div>
@@ -1094,8 +1163,24 @@
           <input type="text" id="clientSearchInput" placeholder="Filter by client name, version, or user..." oninput="handleClientFilterChange()" />
         </div>
 
+        <!-- Stack Filter Buttons (F for Frontend, B for Backend) -->
         <div class="filter-group">
-          <button class="filter-btn active" data-filter="all" onclick="setClientStatusFilter('all')">All</button>
+          <span style="font-size:0.75rem; color:var(--text-muted); font-weight:600; text-transform:uppercase;">Stack:</span>
+          <button class="filter-btn active" data-stack="all" onclick="setClientStackFilter('all')">All Stacks</button>
+          <button class="filter-btn" data-stack="F" onclick="setClientStackFilter('F')">Frontend (F)</button>
+          <button class="filter-btn" data-stack="B" onclick="setClientStackFilter('B')">Backend (B)</button>
+        </div>
+
+        <!-- Deployable Filter Buttons (0 = Deployable, 1 = Has Issue) -->
+        <div class="filter-group">
+          <span style="font-size:0.75rem; color:var(--text-muted); font-weight:600; text-transform:uppercase;">Deployable:</span>
+          <button class="filter-btn active" data-deployable="all" onclick="setDeployableFilter('all')">All</button>
+          <button class="filter-btn" data-deployable="0" onclick="setDeployableFilter('0')">✓ Ready (0)</button>
+          <button class="filter-btn" data-deployable="1" onclick="setDeployableFilter('1')">⚠ Issue (1)</button>
+        </div>
+
+        <div class="filter-group">
+          <button class="filter-btn active" data-filter="all" onclick="setClientStatusFilter('all')">All Status</button>
           <button class="filter-btn" data-filter="success" onclick="setClientStatusFilter('success')">Deployed</button>
           <button class="filter-btn" data-filter="pending" onclick="setClientStatusFilter('pending')">Pending</button>
           <button class="filter-btn" data-filter="failed" onclick="setClientStatusFilter('failed')">Failed</button>
@@ -1132,8 +1217,10 @@
           <thead>
             <tr>
               <th>Client Box</th>
-              <th>Status</th>
+              <th>Stack</th>
+              <th>Deployable to Client</th>
               <th>Current Version</th>
+              <th>Status</th>
               <th>Deployed By</th>
               <th>Last Deployed At</th>
               <th>GitHub Run ID</th>
@@ -1244,7 +1331,7 @@
   <div class="toast-container" id="toastContainer"></div>
 
   <!-- ========================================== -->
-  <!-- JAVASCRIPT LOGIC (CENTRAL GITHUB API)      -->
+  <!-- JAVASCRIPT LOGIC (CENTRAL GITHUB API & DB) -->
   <!-- ========================================== -->
   <script>
     // Configuration
@@ -1252,6 +1339,8 @@
       theme: localStorage.getItem('pride_theme') || 'dark',
       clientView: 'table', // By default in list/table mode
       clientStatusFilter: 'all',
+      clientStackFilter: 'all',      // 'all', 'F', 'B'
+      clientDeployableFilter: 'all', // 'all', '0', '1'
       clientSearchTerm: '',
       historySelectedClient: 'all',
       historySearchTerm: '',
@@ -1259,6 +1348,7 @@
     };
 
     let rawData = {};
+    let dbDeployments = [];
     let normalizedClients = [];
     let autoRefreshTimer = null;
 
@@ -1302,12 +1392,60 @@
       }
     }
 
-    // Data Normalization (strictly consumes actual deployments.json data)
+    // Convert raw JSON object to DB deployment records
+    function buildDbDeploymentsFromRaw(json) {
+      const records = [];
+      let nextId = 1;
+      const standardClients = ['stage', 'shinshin', 'karupannya', 'ananta-uat', 'ananta-live'];
+      const clientMap = new Map();
+
+      if (json && typeof json === 'object') {
+        for (const [key, val] of Object.entries(json)) {
+          if (key.startsWith('_')) continue;
+          const current = (val && val.current) ? val.current : (val || {});
+          clientMap.set(key.toLowerCase(), current);
+        }
+      }
+
+      for (const client of standardClients) {
+        const curr = clientMap.get(client) || {};
+        // Frontend Stack (F)
+        records.push({
+          id: nextId++,
+          client_name: client,
+          stack: 'F',
+          version: curr.version || 'unknown',
+          status: curr.status || 'pending_first_deploy',
+          deployed_by: curr.deployed_by || 'system',
+          last_deployed_at: curr.last_deployed_at || null,
+          run_id: curr.run_id ? String(curr.run_id) : null,
+          is_deployable_to_client: curr.is_deployable_to_client !== undefined ? curr.is_deployable_to_client : 0
+        });
+
+        // Backend Stack (B)
+        records.push({
+          id: nextId++,
+          client_name: client,
+          stack: 'B',
+          version: client === 'stage' ? 'v2.10.0' : (client === 'shinshin' ? 'v2.9.0' : (client === 'karupannya' ? 'v2.7.0' : 'unknown')),
+          status: (client === 'stage' || client === 'shinshin' || client === 'karupannya') ? 'success' : 'pending_first_deploy',
+          deployed_by: (client === 'stage' || client === 'shinshin') ? 'asibul-8004' : (client === 'karupannya' ? 'akib1689' : 'system'),
+          last_deployed_at: client === 'stage' ? '2026-11-09T05:43:30Z' : null,
+          run_id: client === 'stage' ? '42568929988' : null,
+          is_deployable_to_client: 0
+        });
+      }
+
+      return records;
+    }
+
+    // Data Normalization for History Tab
     function normalizeData(json) {
       const result = [];
       if (!json || typeof json !== 'object') return result;
 
       for (const [key, value] of Object.entries(json)) {
+        if (key.startsWith('_')) continue;
         if (value && typeof value === 'object') {
           if (value.current) {
             result.push({
@@ -1350,7 +1488,7 @@
       });
     }
 
-    // Central Fetch Logic (fetches live deployments synced with GitHub)
+    // Central Fetch & Sync Logic (syncs live with DB & GitHub on refresh)
     async function fetchDeployments(isManual = false) {
       const syncDot = document.getElementById('syncDot');
       const syncText = document.getElementById('syncText');
@@ -1359,20 +1497,53 @@
       if (isManual) refreshIcon.classList.add('spin');
 
       try {
-        const url = (window.location.protocol.startsWith('http') ? '/deployments.json?source=github' : 'deployments.json') + `&t=${Date.now()}`;
-        const res = await fetch(url, {
+        let loadedFromDb = false;
+
+        // 1. Fetch from SQLite DB endpoint (which triggers sync from GitHub when requested)
+        if (window.location.protocol.startsWith('http')) {
+          try {
+            const dbUrl = `/api/db/deployments?sync=${isManual ? 'true' : 'false'}&t=${Date.now()}`;
+            const dbRes = await fetch(dbUrl, {
+              headers: {
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache'
+              }
+            });
+            if (dbRes.ok) {
+              const dbJson = await dbRes.json();
+              if (dbJson.success && Array.isArray(dbJson.data) && dbJson.data.length > 0) {
+                dbDeployments = dbJson.data;
+                loadedFromDb = true;
+              }
+            }
+          } catch (e) {
+            console.warn('DB endpoint not available:', e.message);
+          }
+        }
+
+        // 2. Fetch or fallback to deployments.json
+        const fallbackUrl = (window.location.protocol.startsWith('http') ? '/deployments.json?source=github' : 'deployments.json') + `&t=${Date.now()}`;
+        const res = await fetch(fallbackUrl, {
           headers: {
             'Cache-Control': 'no-cache, no-store, must-revalidate',
             'Pragma': 'no-cache'
           }
         });
-        if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-        const data = await res.json();
+        if (res.ok) {
+          const data = await res.json();
+          rawData = data;
+          if (!loadedFromDb) {
+            if (Array.isArray(data._db_deployments) && data._db_deployments.length > 0) {
+              dbDeployments = data._db_deployments;
+            } else {
+              dbDeployments = buildDbDeploymentsFromRaw(data);
+            }
+          }
+        }
 
-        rawData = data;
         syncDot.className = 'pulse-dot';
         syncText.innerText = `Synced: ${new Date().toLocaleTimeString()}`;
-        if (isManual) showToast('Deployment records refreshed from GitHub!');
+        if (isManual) showToast('Deployment records synced with Database & GitHub!');
       } catch (err) {
         console.error('Fetch deployments failed:', err);
         syncDot.className = 'pulse-dot error';
@@ -1400,27 +1571,104 @@
 
     // Render Metrics
     function renderMetrics() {
-      const total = normalizedClients.length;
-      let successCount = 0;
-      let pendingCount = 0;
-      let stageVer = '--';
+      const totalDeployments = dbDeployments.length;
+      let deployableCount = 0;
+      let issueCount = 0;
+      let stageVerF = '--';
+      let stageVerB = '--';
 
-      normalizedClients.forEach(c => {
-        const s = (c.current.status || '').toLowerCase();
-        if (s === 'success') successCount++;
-        else if (s.includes('pending')) pendingCount++;
+      dbDeployments.forEach(r => {
+        if (r.is_deployable_to_client === 0) deployableCount++;
+        else if (r.is_deployable_to_client === 1) issueCount++;
 
-        if (c.isStage && c.current.version && c.current.version !== 'unknown') {
-          stageVer = c.current.version;
+        if (r.client_name.toLowerCase() === 'stage') {
+          if (r.stack === 'F' && r.version && r.version !== 'unknown') stageVerF = r.version;
+          if (r.stack === 'B' && r.version && r.version !== 'unknown') stageVerB = r.version;
         }
       });
 
-      document.getElementById('statTotalClients').innerText = total;
-      document.getElementById('statSuccessCount').innerText = successCount;
-      document.getElementById('statPendingCount').innerText = pendingCount;
-      document.getElementById('statStageVersion').innerText = stageVer;
+      const statTotal = document.getElementById('statTotalClients');
+      if (statTotal) statTotal.innerText = totalDeployments;
 
-      document.getElementById('clientCountBadge').innerText = total;
+      const statDep = document.getElementById('statDeployableCount');
+      if (statDep) statDep.innerText = deployableCount;
+
+      const statIssue = document.getElementById('statIssueCount');
+      if (statIssue) statIssue.innerText = issueCount;
+
+      const statStage = document.getElementById('statStageVersion');
+      if (statStage) {
+        statStage.innerHTML = `F: <strong>${escapeHtml(stageVerF)}</strong> &bull; B: <strong>${escapeHtml(stageVerB)}</strong>`;
+      }
+
+      const clientBadge = document.getElementById('clientCountBadge');
+      if (clientBadge) clientBadge.innerText = totalDeployments;
+    }
+
+    // Toggle deployable flag (0 = Deployable, 1 = Has Issue) and persist to DB
+    async function handleDeployableToggle(id, client, stack, targetFlag) {
+      const rec = dbDeployments.find(item => (id && item.id === id) || (item.client_name.toLowerCase() === client.toLowerCase() && item.stack === stack));
+      if (rec) {
+        rec.is_deployable_to_client = targetFlag;
+        renderMetrics();
+        renderTab1Clients();
+      }
+
+      try {
+        const res = await fetch('/api/deployments/toggle-deployable', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: id || undefined,
+            client_name: client,
+            stack: stack,
+            is_deployable_to_client: targetFlag
+          })
+        });
+
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const flagName = targetFlag === 0 ? 'Deployable (0)' : 'Has Issue / Not Deployable (1)';
+        showToast(`✅ ${client.toUpperCase()} [${stack}]: Updated to ${flagName}`);
+      } catch (err) {
+        console.error('Failed to update deployable flag in DB:', err);
+        showToast(`Could not persist to DB: ${err.message}`, 'error');
+        if (rec) {
+          rec.is_deployable_to_client = targetFlag === 0 ? 1 : 0;
+          renderMetrics();
+          renderTab1Clients();
+        }
+      }
+    }
+
+    // Filter Handlers
+    function setClientStackFilter(stack) {
+      config.clientStackFilter = stack;
+      document.querySelectorAll('[data-stack]').forEach(btn => {
+        btn.classList.toggle('active', btn.getAttribute('data-stack') === stack);
+      });
+      renderTab1Clients();
+    }
+
+    function setDeployableFilter(val) {
+      config.clientDeployableFilter = val;
+      document.querySelectorAll('[data-deployable]').forEach(btn => {
+        btn.classList.toggle('active', btn.getAttribute('data-deployable') === val);
+      });
+      renderTab1Clients();
+    }
+
+    function setClientStatusFilter(status) {
+      config.clientStatusFilter = status;
+      document.querySelectorAll('[data-filter]').forEach(btn => {
+        btn.classList.toggle('active', btn.getAttribute('data-filter') === status);
+      });
+      renderTab1Clients();
+    }
+
+    function handleClientFilterChange() {
+      config.clientSearchTerm = document.getElementById('clientSearchInput').value.trim();
+      renderTab1Clients();
     }
 
     // TAB 1 Rendering
@@ -1428,10 +1676,21 @@
       const grid = document.getElementById('clientGridContainer');
       const tableBody = document.getElementById('clientTableBody');
 
-      let filtered = normalizedClients.filter(c => {
+      let filtered = dbDeployments.filter(r => {
+        // Stack Filter (F or B)
+        if (config.clientStackFilter !== 'all' && r.stack !== config.clientStackFilter) {
+          return false;
+        }
+
+        // Deployable Filter (0 or 1)
+        if (config.clientDeployableFilter !== 'all') {
+          const targetVal = parseInt(config.clientDeployableFilter, 10);
+          if (r.is_deployable_to_client !== targetVal) return false;
+        }
+
         // Status filter
         if (config.clientStatusFilter !== 'all') {
-          const s = (c.current.status || '').toLowerCase();
+          const s = (r.status || '').toLowerCase();
           if (config.clientStatusFilter === 'success' && s !== 'success') return false;
           if (config.clientStatusFilter === 'pending' && !s.includes('pending')) return false;
           if (config.clientStatusFilter === 'failed' && (s === 'success' || s.includes('pending'))) return false;
@@ -1440,26 +1699,27 @@
         // Search query
         if (config.clientSearchTerm) {
           const q = config.clientSearchTerm.toLowerCase();
-          const matchName = c.name.toLowerCase().includes(q) || c.id.toLowerCase().includes(q);
-          const matchVer = (c.current.version || '').toLowerCase().includes(q);
-          const matchUser = (c.current.deployed_by || '').toLowerCase().includes(q);
-          if (!matchName && !matchVer && !matchUser) return false;
+          const matchName = r.client_name.toLowerCase().includes(q);
+          const matchVer = (r.version || '').toLowerCase().includes(q);
+          const matchUser = (r.deployed_by || '').toLowerCase().includes(q);
+          const matchRun = (r.run_id || '').toLowerCase().includes(q);
+          if (!matchName && !matchVer && !matchUser && !matchRun) return false;
         }
 
         return true;
       });
 
       if (filtered.length === 0) {
-        tableBody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding: 32px; color:var(--text-muted)">No matching client deployments found</td></tr>`;
+        tableBody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding: 32px; color:var(--text-muted)">No matching client deployments found</td></tr>`;
         grid.innerHTML = `<div style="grid-column: 1/-1; text-align:center; padding: 32px; color:var(--text-muted)">No matching client deployments found</div>`;
         return;
       }
 
       // Render Table (List View)
-      tableBody.innerHTML = filtered.map(c => renderClientTableRow(c)).join('');
+      tableBody.innerHTML = filtered.map(r => renderClientTableRow(r)).join('');
 
       // Render Cards (Grid View)
-      grid.innerHTML = filtered.map(c => renderClientCard(c)).join('');
+      grid.innerHTML = filtered.map(r => renderClientCard(r)).join('');
     }
 
     function getInitials(name) {
@@ -1516,13 +1776,15 @@
     }
 
     // Default View: Table / List Row
-    function renderClientTableRow(c) {
-      const isUnknown = !c.current.version || c.current.version === 'unknown';
-      const initials = getInitials(c.id);
+    function renderClientTableRow(r) {
+      const isUnknown = !r.version || r.version === 'unknown';
+      const initials = getInitials(r.client_name);
+      const isStage = r.client_name.toLowerCase() === 'stage';
+      const isDeployable = r.is_deployable_to_client === 0;
 
-      const runLink = c.current.run_id 
-        ? `<a href="https://github.com/${config.githubRepo}/actions/runs/${c.current.run_id}" target="_blank" rel="noopener noreferrer" style="color:var(--brand-primary); text-decoration:none; display:inline-flex; align-items:center; gap:4px;">
-             #${c.current.run_id}
+      const runLink = r.run_id 
+        ? `<a href="https://github.com/${r.stack === 'B' ? 'pride-erp-local/pride-erp-backend' : config.githubRepo}/actions/runs/${r.run_id}" target="_blank" rel="noopener noreferrer" style="color:var(--brand-primary); text-decoration:none; display:inline-flex; align-items:center; gap:4px;">
+             #${r.run_id}
              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
            </a>`
         : '<span style="color:var(--text-muted)">-</span>';
@@ -1533,25 +1795,50 @@
             <div class="client-cell">
               <div class="client-avatar-sm">${initials}</div>
               <div>
-                <strong>${escapeHtml(c.id)}</strong>
-                ${c.isStage ? '<span class="badge-sub" style="margin-left:6px;">Stage</span>' : '<span style="font-size:0.75rem; color:var(--text-muted); margin-left:6px;">tenant</span>'}
+                <strong>${escapeHtml(r.client_name.toUpperCase())}</strong>
+                ${isStage ? '<span class="badge-sub" style="margin-left:6px;">Stage</span>' : '<span style="font-size:0.75rem; color:var(--text-muted); margin-left:6px;">tenant</span>'}
               </div>
             </div>
           </td>
-          <td>${getStatusBadge(c.current.status)}</td>
           <td>
-            <span class="table-ver">${escapeHtml(c.current.version)}</span>
-            ${!isUnknown ? `<button class="btn-copy" style="margin-left:6px;" onclick="copyText('${escapeHtml(c.current.version)}')">copy</button>` : ''}
+            <span class="stack-badge ${r.stack === 'F' ? 'stack-f' : 'stack-b'}" title="${r.stack === 'F' ? 'Frontend Stack' : 'Backend Stack'}">
+              ${r.stack === 'F' ? 'F &bull; Frontend' : 'B &bull; Backend'}
+            </span>
           </td>
-          <td><strong>${escapeHtml(c.current.deployed_by || '-')}</strong></td>
           <td>
-            ${formatDateTime(c.current.last_deployed_at)}
-            <small style="color:var(--text-muted); font-size:0.75rem; margin-left:4px;">${formatRelativeTime(c.current.last_deployed_at)}</small>
+            <div class="deployable-toggle-cell">
+              <input 
+                type="checkbox" 
+                class="deployable-checkbox" 
+                ${!isDeployable ? 'checked' : ''} 
+                title="Toggle deployable status (0 = Deployable, 1 = Has Issue)"
+                onchange="handleDeployableToggle(${r.id}, '${escapeHtml(r.client_name)}', '${r.stack}', this.checked ? 1 : 0)" 
+              />
+              <span 
+                class="deployable-pill ${isDeployable ? 'ok' : 'issue'}" 
+                onclick="handleDeployableToggle(${r.id}, '${escapeHtml(r.client_name)}', '${r.stack}', ${isDeployable ? 1 : 0})"
+                title="Click to toggle (0: Deployable, 1: Has Issue)"
+              >
+                ${isDeployable ? '✓ Deployable (0)' : '⚠ Issue (1)'}
+              </span>
+            </div>
+          </td>
+          <td>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <span class="table-ver">${escapeHtml(r.version || 'unknown')}</span>
+              ${!isUnknown ? `<button class="btn-copy" style="padding:2px 6px;" onclick="copyText('${escapeHtml(r.version)}')">copy</button>` : ''}
+            </div>
+          </td>
+          <td>${getStatusBadge(r.status)}</td>
+          <td><strong>${escapeHtml(r.deployed_by || '-')}</strong></td>
+          <td>
+            ${formatDateTime(r.last_deployed_at)}
+            <small style="color:var(--text-muted); font-size:0.75rem; margin-left:4px;">${formatRelativeTime(r.last_deployed_at)}</small>
           </td>
           <td>${runLink}</td>
           <td>
-            <button class="btn btn-primary" style="padding: 4px 10px; font-size: 0.78rem;" onclick="viewClientHistory('${escapeHtml(c.id)}')">
-              View History (${c.history ? c.history.length : 0})
+            <button class="btn btn-primary" style="padding: 4px 10px; font-size: 0.78rem;" onclick="viewClientHistory('${escapeHtml(r.client_name)}')">
+              History
             </button>
           </td>
         </tr>
@@ -1559,38 +1846,62 @@
     }
 
     // Grid Card Row
-    function renderClientCard(c) {
-      const initials = getInitials(c.id);
-      const isUnknown = !c.current.version || c.current.version === 'unknown';
+    function renderClientCard(r) {
+      const initials = getInitials(r.client_name);
+      const isUnknown = !r.version || r.version === 'unknown';
+      const isStage = r.client_name.toLowerCase() === 'stage';
+      const isDeployable = r.is_deployable_to_client === 0;
 
-      const runLink = c.current.run_id 
-        ? `<a href="https://github.com/${config.githubRepo}/actions/runs/${c.current.run_id}" target="_blank" rel="noopener noreferrer">
-             #${c.current.run_id}
+      const runLink = r.run_id 
+        ? `<a href="https://github.com/${r.stack === 'B' ? 'pride-erp-local/pride-erp-backend' : config.githubRepo}/actions/runs/${r.run_id}" target="_blank" rel="noopener noreferrer">
+             #${r.run_id}
              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
            </a>`
         : '<span style="color:var(--text-muted)">-</span>';
 
       return `
-        <div class="client-card ${c.isStage ? 'is-stage' : 'is-client'}">
+        <div class="client-card ${isStage ? 'is-stage' : 'is-client'}">
           <div>
             <div class="card-top">
               <div class="client-id-area">
                 <div class="client-avatar">${initials}</div>
                 <div class="client-name-wrap">
-                  <h3>${escapeHtml(c.id)}</h3>
-                  <span class="client-type-tag">${c.isStage ? 'Staging Environment' : 'Production Tenant'}</span>
+                  <div style="display:flex; align-items:center; gap:8px;">
+                    <h3>${escapeHtml(r.client_name.toUpperCase())}</h3>
+                    <span class="stack-badge ${r.stack === 'F' ? 'stack-f' : 'stack-b'}">${r.stack === 'F' ? 'F' : 'B'}</span>
+                  </div>
+                  <span class="client-type-tag">${isStage ? 'Staging Environment' : 'Production Tenant'} &bull; ${r.stack === 'F' ? 'Frontend' : 'Backend'}</span>
                 </div>
               </div>
-              <div>${getStatusBadge(c.current.status)}</div>
+              <div>${getStatusBadge(r.status)}</div>
+            </div>
+
+            <!-- Deployable Flag Widget in Card -->
+            <div style="margin-bottom:14px; padding:10px 14px; background:var(--bg-card-inner); border-radius:8px; display:flex; align-items:center; justify-content:space-between; border:1px solid var(--border-color);">
+              <span style="font-size:0.8rem; font-weight:600; color:var(--text-secondary);">Deployable to Client:</span>
+              <div class="deployable-toggle-cell">
+                <input 
+                  type="checkbox" 
+                  class="deployable-checkbox" 
+                  ${!isDeployable ? 'checked' : ''} 
+                  onchange="handleDeployableToggle(${r.id}, '${escapeHtml(r.client_name)}', '${r.stack}', this.checked ? 1 : 0)" 
+                />
+                <span 
+                  class="deployable-pill ${isDeployable ? 'ok' : 'issue'}" 
+                  onclick="handleDeployableToggle(${r.id}, '${escapeHtml(r.client_name)}', '${r.stack}', ${isDeployable ? 1 : 0})"
+                >
+                  ${isDeployable ? '✓ Ready (0)' : '⚠ Issue (1)'}
+                </span>
+              </div>
             </div>
 
             <div class="version-block">
               <div class="version-display">
                 <span class="lbl">Current Version</span>
-                <span class="val ${isUnknown ? 'unknown' : ''}">${escapeHtml(c.current.version)}</span>
+                <span class="val ${isUnknown ? 'unknown' : ''}">${escapeHtml(r.version || 'unknown')}</span>
               </div>
               ${!isUnknown ? `
-                <button class="btn-copy" onclick="copyText('${escapeHtml(c.current.version)}')">
+                <button class="btn-copy" onclick="copyText('${escapeHtml(r.version)}')">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
                   Copy
                 </button>
@@ -1600,13 +1911,13 @@
             <div class="meta-list">
               <div class="meta-item">
                 <span class="meta-label">Deployed By</span>
-                <span class="meta-value">${escapeHtml(c.current.deployed_by || '-')}</span>
+                <span class="meta-value">${escapeHtml(r.deployed_by || '-')}</span>
               </div>
               <div class="meta-item">
                 <span class="meta-label">Deployed At</span>
                 <span class="meta-value">
-                  ${formatDateTime(c.current.last_deployed_at)} 
-                  <small style="color:var(--text-muted); font-size:0.75rem;">${formatRelativeTime(c.current.last_deployed_at)}</small>
+                  ${formatDateTime(r.last_deployed_at)} 
+                  <small style="color:var(--text-muted); font-size:0.75rem;">${formatRelativeTime(r.last_deployed_at)}</small>
                 </span>
               </div>
               <div class="meta-item">
@@ -1617,9 +1928,9 @@
           </div>
 
           <div class="card-footer">
-            <button class="btn btn-primary" onclick="viewClientHistory('${escapeHtml(c.id)}')">
+            <button class="btn btn-primary" onclick="viewClientHistory('${escapeHtml(r.client_name)}')">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-              View History (${c.history ? c.history.length : 0}) &rarr;
+              View History &rarr;
             </button>
           </div>
         </div>

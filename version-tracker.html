@@ -1348,7 +1348,7 @@
       if (isManual) refreshIcon.classList.add('spin');
 
       try {
-        const url = (window.location.protocol.startsWith('http') ? '/deployments.json' : 'deployments.json') + `?t=${Date.now()}`;
+        const url = (window.location.protocol.startsWith('http') ? '/deployments.json?source=github' : 'deployments.json') + `&t=${Date.now()}`;
         const res = await fetch(url, {
           headers: {
             'Cache-Control': 'no-cache, no-store, must-revalidate',

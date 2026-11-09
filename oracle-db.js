@@ -643,6 +643,117 @@ async function updateHistoryDeployableFlag(dtlId, flagValue) {
 }
 
 /**
+ * Get map of known run_id -> status from DTL table
+ */
+async function getKnownRunsMap() {
+  const conn = await getConnection();
+  try {
+    const res = await conn.execute(
+      `SELECT RUN_ID AS "run_id", STATUS AS "status" FROM ${DTL_TABLE_NAME} WHERE RUN_ID IS NOT NULL`
+    );
+    const map = new Map();
+    for (const r of (res.rows || [])) {
+      if (r.run_id) map.set(String(r.run_id), (r.status || '').toLowerCase());
+    }
+    return map;
+  } catch (err) {
+    if (err.message && err.message.includes('ORA-00942')) {
+      return new Map();
+    }
+    throw err;
+  } finally {
+    await conn.close();
+  }
+}
+
+/**
+ * Update status of a history record by run_id
+ */
+async function updateHistoryStatus(runId, status) {
+  if (!runId) return;
+  const conn = await getConnection();
+  try {
+    await conn.execute(
+      `UPDATE ${DTL_TABLE_NAME} SET STATUS = :status WHERE RUN_ID = :runId`,
+      { status, runId: String(runId) },
+      { autoCommit: true }
+    );
+    await conn.commit();
+  } catch (err) {
+    if (err.message && err.message.includes('ORA-00942')) return;
+    throw err;
+  } finally {
+    await conn.close();
+  }
+}
+
+/**
+ * Refresh master table client versions from latest DTL events
+ */
+async function refreshMasterClients(clientList) {
+  if (!clientList || clientList.length === 0) return;
+  const conn = await getConnection();
+  const now = new Date().toISOString();
+  try {
+    for (const client of clientList) {
+      const lower = client.toLowerCase().trim();
+      const resF = await conn.execute(
+        `SELECT FRONTEND_VERSION AS "fVer", DEPLOYED_BY AS "by", FRONTEND_DEPLOYED_AT AS "at", RUN_ID AS "runId", STATUS AS "status"
+         FROM ${DTL_TABLE_NAME}
+         WHERE LOWER(CLIENT_NAME) = :client AND EVENT_STACK = 'F'
+         ORDER BY EVENT_TIME DESC FETCH FIRST 1 ROWS ONLY`,
+        { client: lower }
+      );
+      const resB = await conn.execute(
+        `SELECT BACKEND_VERSION AS "bVer", DEPLOYED_BY AS "by", BACKEND_DEPLOYED_AT AS "at", RUN_ID AS "runId", STATUS AS "status"
+         FROM ${DTL_TABLE_NAME}
+         WHERE LOWER(CLIENT_NAME) = :client AND EVENT_STACK = 'B'
+         ORDER BY EVENT_TIME DESC FETCH FIRST 1 ROWS ONLY`,
+        { client: lower }
+      );
+
+      const rowF = resF.rows && resF.rows[0];
+      const rowB = resB.rows && resB.rows[0];
+
+      if (rowF || rowB) {
+        const fVer = (rowF && rowF.fVer) || 'unknown';
+        const bVer = (rowB && rowB.bVer) || 'unknown';
+        const fAt = (rowF && rowF.at) || null;
+        const bAt = (rowB && rowB.at) || null;
+        const fRun = (rowF && rowF.runId) ? String(rowF.runId) : null;
+        const bRun = (rowB && rowB.runId) ? String(rowB.runId) : null;
+        const by = (rowF && rowF.by) || (rowB && rowB.by) || 'system';
+        const status = ((rowF && rowF.status === 'success') || (rowB && rowB.status === 'success')) ? 'success' : 'pending_first_deploy';
+
+        await conn.execute(
+          `UPDATE ${TABLE_NAME}
+           SET FRONTEND_VERSION = :fVer,
+               BACKEND_VERSION = :bVer,
+               STATUS = :status,
+               DEPLOYED_BY = :by,
+               FRONTEND_DEPLOYED_AT = :fAt,
+               BACKEND_DEPLOYED_AT = :bAt,
+               FRONTEND_RUN_ID = :fRun,
+               BACKEND_RUN_ID = :bRun,
+               SYNCED_AT = :now,
+               UPDATED_AT = :now,
+               SS_MODIFIED_ON = :now
+           WHERE LOWER(CLIENT_NAME) = :client`,
+          { fVer, bVer, status, by, fAt, bAt, fRun, bRun, now, client: lower },
+          { autoCommit: true }
+        );
+        await conn.commit();
+      }
+    }
+  } catch (err) {
+    if (err.message && err.message.includes('ORA-00942')) return;
+    throw err;
+  } finally {
+    await conn.close();
+  }
+}
+
+/**
  * Close Oracle connection pool gracefully
  */
 async function closePool() {
@@ -659,6 +770,9 @@ module.exports = {
   getConnection,
   getAllDeployments,
   getDeploymentHistory,
+  getKnownRunsMap,
+  updateHistoryStatus,
+  refreshMasterClients,
   upsertDeployment,
   syncHistoryEvents,
   updateDeployableFlag,

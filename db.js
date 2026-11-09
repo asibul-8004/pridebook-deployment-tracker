@@ -530,398 +530,370 @@ async function upsertDeployment(record) {
 }
 
 /**
- * Fetch raw deployment history from GitHub Frontend repository
+ * Check if a status string represents a terminal (final) state
  */
-async function fetchFrontendRawData(token) {
-  const repo = process.env.GITHUB_FRONTEND_REPO || process.env.GITHUB_REPO || 'pride-erp-local/pride-erp-frontend';
-  const branch = process.env.GITHUB_BRANCH || 'main';
-  const effectiveToken = token || process.env.GITHUB_TOKEN || '';
-  const eventsByClient = {};
+function isTerminalStatus(status) {
+  if (!status) return false;
+  const s = String(status).toLowerCase().trim();
+  return s === 'success' || s === 'completed' || s === 'failure' || s === 'failed' || s === 'cancelled' || s === 'timed_out';
+}
 
+/**
+ * Get map of known run_id -> status from database (Detail Table: SA_DEPLOYMENT_TRACKER_DTL)
+ */
+async function getKnownRunsMap() {
+  const oracle = getOracleModule();
+  if (oracle) {
+    try {
+      const map = await oracle.getKnownRunsMap();
+      if (map && map.size > 0) return map;
+    } catch (err) {
+      console.warn('[Oracle Known Runs Warn]: Falling back to SQLite:', err.message);
+    }
+  }
+
+  // SQLite fallback
+  const db = getSqliteDb();
+  const map = new Map();
+  if (db) {
+    try {
+      const rows = db.prepare('SELECT run_id, status FROM SA_DEPLOYMENT_TRACKER_DTL WHERE run_id IS NOT NULL AND run_id != ""').all();
+      for (const r of rows) {
+        if (r.run_id) map.set(String(r.run_id), (r.status || '').toLowerCase());
+      }
+    } catch (_) {}
+  }
+  return map;
+}
+
+/**
+ * Update the status of a specific history record by its run_id
+ */
+async function updateHistoryStatus(runId, status) {
+  if (!runId) return;
+  const oracle = getOracleModule();
+  if (oracle) {
+    try {
+      await oracle.updateHistoryStatus(runId, status);
+    } catch (_) {}
+  }
+
+  const db = getSqliteDb();
+  if (db) {
+    try {
+      db.prepare('UPDATE SA_DEPLOYMENT_TRACKER_DTL SET status = ? WHERE run_id = ?').run(status, String(runId));
+    } catch (_) {}
+  }
+
+  for (const h of mergedHistoryCache) {
+    if (String(h.run_id) === String(runId)) {
+      h.status = status;
+    }
+  }
+}
+
+/**
+ * Refresh master table client versions (SA_DEPLOYMENT_TRACKER) from latest detail events (SA_DEPLOYMENT_TRACKER_DTL)
+ */
+async function refreshMasterClientsFromDtl(clientList) {
+  const targets = (clientList && clientList.length > 0)
+    ? clientList
+    : ['stage', 'shinshin', 'karupannya', 'bengal', 'ananta-uat', 'ananta-live'];
+
+  // 1. Oracle refresh
+  const oracle = getOracleModule();
+  if (oracle) {
+    try {
+      await oracle.refreshMasterClients(targets);
+    } catch (err) {
+      console.warn('[Oracle Master Refresh Warn]:', err.message);
+    }
+  }
+
+  // 2. SQLite refresh
+  const db = getSqliteDb();
+  if (db) {
+    const now = new Date().toISOString();
+    try {
+      for (const rawClient of targets) {
+        const client = rawClient.toLowerCase().trim();
+        const latestF = db.prepare(`
+          SELECT frontend_version, deployed_by, event_time, run_id, status 
+          FROM SA_DEPLOYMENT_TRACKER_DTL 
+          WHERE LOWER(client_name) = ? AND event_stack = 'F' 
+          ORDER BY event_time DESC LIMIT 1
+        `).get(client);
+
+        const latestB = db.prepare(`
+          SELECT backend_version, deployed_by, event_time, run_id, status 
+          FROM SA_DEPLOYMENT_TRACKER_DTL 
+          WHERE LOWER(client_name) = ? AND event_stack = 'B' 
+          ORDER BY event_time DESC LIMIT 1
+        `).get(client);
+
+        if (latestF || latestB) {
+          const fVer = latestF ? latestF.frontend_version : 'unknown';
+          const bVer = latestB ? latestB.backend_version : 'unknown';
+          const fAt = latestF ? latestF.event_time : null;
+          const bAt = latestB ? latestB.event_time : null;
+          const fRun = latestF ? latestF.run_id : null;
+          const bRun = latestB ? latestB.run_id : null;
+          const actor = (latestF && latestF.deployed_by) || (latestB && latestB.deployed_by) || 'system';
+          const status = ((latestF && latestF.status === 'success') || (latestB && latestB.status === 'success'))
+            ? 'success'
+            : ((latestF && latestF.status) || (latestB && latestB.status) || 'pending_first_deploy');
+
+          db.prepare(`
+            INSERT INTO SA_DEPLOYMENT_TRACKER (
+              client_name, frontend_version, backend_version, status, deployed_by,
+              frontend_deployed_at, backend_deployed_at, frontend_run_id, backend_run_id,
+              is_deployable_to_client, synced_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+            ON CONFLICT(client_name) DO UPDATE SET
+              frontend_version = excluded.frontend_version,
+              backend_version = excluded.backend_version,
+              status = excluded.status,
+              deployed_by = excluded.deployed_by,
+              frontend_deployed_at = excluded.frontend_deployed_at,
+              backend_deployed_at = excluded.backend_deployed_at,
+              frontend_run_id = excluded.frontend_run_id,
+              backend_run_id = excluded.backend_run_id,
+              synced_at = excluded.synced_at,
+              updated_at = excluded.updated_at
+          `).run(client, fVer, bVer, status, actor, fAt, bAt, fRun, bRun, now, now);
+
+          const mem = inMemoryStore.get(client);
+          if (mem) {
+            mem.frontend_version = fVer;
+            mem.backend_version = bVer;
+            mem.status = status;
+            mem.frontend_deployed_at = fAt;
+            mem.backend_deployed_at = bAt;
+            mem.synced_at = now;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[SQLite Master Refresh Warn]:', err.message);
+    }
+  }
+}
+
+/**
+ * Fetch incremental workflow runs from GitHub Actions (ONLY runs NOT in DB or non-terminal)
+ */
+async function fetchIncrementalWorkflowRuns({ repo, stack, token, knownRunsMap }) {
   const headers = {
     'User-Agent': 'Pridebook-DB-Sync',
     'Accept': 'application/vnd.github.v3+json'
   };
-  if (effectiveToken) headers['Authorization'] = `token ${effectiveToken.trim()}`;
+  if (token) headers['Authorization'] = `token ${token.trim()}`;
 
-  // 1. Primary: Fetch directly from release-deploy.yml workflow runs (same as backend)
-  if (effectiveToken) {
-    try {
-      let runs = [];
-      const workflowUrl = `https://api.github.com/repos/${repo}/actions/workflows/release-deploy.yml/runs?per_page=40`;
-      const res = await fetch(workflowUrl, { headers });
-      if (res.ok) {
-        const data = await res.json();
-        runs = data.workflow_runs || [];
-      } else {
-        const fallbackUrl = `https://api.github.com/repos/${repo}/actions/runs?per_page=40`;
-        const fallbackRes = await fetch(fallbackUrl, { headers });
-        if (fallbackRes.ok) {
-          const data = await fallbackRes.json();
-          runs = (data.workflow_runs || []).filter(r => r.name && r.name.includes('Release Deploy'));
-        }
-      }
+  const runsUrl = `https://api.github.com/repos/${repo}/actions/workflows/release-deploy.yml/runs?per_page=12`;
+  const res = await fetch(runsUrl, { headers });
+  if (!res.ok) return [];
 
-      await Promise.all(runs.map(async (run) => {
-        try {
-          let jobs = workflowJobsCache.get(run.id);
-          if (!jobs) {
-            const jobsRes = await fetch(run.jobs_url, { headers });
-            if (!jobsRes.ok) return;
-            const jobsData = await jobsRes.json();
-            jobs = jobsData.jobs || [];
-            if (run.status === 'completed') {
-              workflowJobsCache.set(run.id, jobs);
-            }
-          }
-          for (const job of jobs) {
-            const match = job.name.match(/(?:Deploy|Validate release)\s+(v[0-9.]+)\s+(?:to|for)\s+([a-zA-Z0-9_-]+)/i);
-            if (match && job.name.startsWith('Deploy')) {
-              const client = match[2].toLowerCase().trim();
-              if (!eventsByClient[client]) eventsByClient[client] = [];
-              eventsByClient[client].push({
-                stack: 'F',
-                version: match[1],
-                timestamp: job.completed_at || run.created_at,
-                deployed_by: run.actor?.login || 'system',
-                status: job.conclusion === 'success' ? 'success' : (job.conclusion || 'pending'),
-                run_id: String(run.id)
-              });
-            }
-          }
-        } catch (e) {}
-      }));
-    } catch (err) {
-      console.warn(`[Sync] Could not inspect frontend workflow runs:`, err.message);
+  const data = await res.json();
+  const runs = data.workflow_runs || [];
+  const events = [];
+
+  for (const run of runs) {
+    const runIdStr = String(run.id);
+    const knownStatus = knownRunsMap.get(runIdStr);
+
+    // Standard Incremental Rule: If run is already recorded with terminal status, SKIP!
+    if (knownStatus && isTerminalStatus(knownStatus)) {
+      continue;
     }
-  }
 
-  // 2. Fallback to deployments.json if workflow runs returned nothing
-  if (Object.keys(eventsByClient).length === 0) {
-    try {
-      const url = `https://api.github.com/repos/${repo}/contents/deployments.json?ref=${branch}`;
-      const res = await fetch(url, { headers });
-      if (res.ok) {
-        const result = await res.json();
-        let jsonContent = {};
-        if (result.content && result.encoding === 'base64') {
-          jsonContent = JSON.parse(Buffer.from(result.content, 'base64').toString('utf8'));
-        } else if (typeof result === 'object') {
-          jsonContent = result;
-        }
-
-        for (const [key, val] of Object.entries(jsonContent)) {
-          if (!val) continue;
-          const client = key.toLowerCase().trim();
-          if (!eventsByClient[client]) eventsByClient[client] = [];
-
-          // Historical runs
-          if (val.history && Array.isArray(val.history)) {
-            for (const h of val.history) {
-              if (h.version) {
-                eventsByClient[client].push({
-                  stack: 'F',
-                  version: h.version,
-                  timestamp: h.last_deployed_at || null,
-                  deployed_by: h.deployed_by || 'system',
-                  status: h.status || 'success',
-                  run_id: h.run_id ? String(h.run_id) : null
-                });
-              }
-            }
-          }
-
-          // Current run
-          const current = val.current ? val.current : val;
-          if (current.version) {
-            eventsByClient[client].push({
-              stack: 'F',
-              version: current.version,
-              timestamp: current.last_deployed_at || null,
-              deployed_by: current.deployed_by || 'system',
-              status: current.status || 'success',
-              run_id: current.run_id ? String(current.run_id) : null
-            });
+    // Run is either brand new (not in DB) or needs status update from pending
+    let jobs = workflowJobsCache.get(run.id);
+    if (!jobs) {
+      try {
+        const jobsRes = await fetch(run.jobs_url, { headers });
+        if (jobsRes.ok) {
+          const jobsData = await jobsRes.json();
+          jobs = jobsData.jobs || [];
+          if (run.status === 'completed') {
+            workflowJobsCache.set(run.id, jobs);
           }
         }
-      }
-    } catch (err) {
-      console.warn(`[Sync] Failed to fetch frontend deployments.json from GitHub:`, err.message);
+      } catch (_) {}
     }
-  }
 
-  // 3. Fallback to local deployments.json if still empty
-  const localJsonPath = path.join(rootDir, 'deployments.json');
-  if (Object.keys(eventsByClient).length === 0 && fs.existsSync(localJsonPath)) {
-    try {
-      const localData = JSON.parse(fs.readFileSync(localJsonPath, 'utf8'));
-      for (const [key, val] of Object.entries(localData)) {
-        const client = key.toLowerCase().trim();
-        if (!eventsByClient[client]) eventsByClient[client] = [];
-        const current = val.current ? val.current : val;
-        eventsByClient[client].push({
-          stack: 'F',
-          version: current.version || 'unknown',
-          timestamp: current.last_deployed_at || null,
-          deployed_by: current.deployed_by || 'system',
-          status: current.status || 'pending_first_deploy',
-          run_id: current.run_id ? String(current.run_id) : null
+    for (const job of (jobs || [])) {
+      const match = job.name.match(/(?:Deploy|Validate release)\s+(v[0-9.]+)\s+(?:to|for)\s+([a-zA-Z0-9_-]+)/i);
+      if (match && job.name.startsWith('Deploy')) {
+        const client = match[2].toLowerCase().trim();
+        let status = 'pending';
+        if (run.conclusion === 'success' || job.conclusion === 'success') status = 'success';
+        else if (run.conclusion === 'cancelled' || job.conclusion === 'cancelled') status = 'cancelled';
+        else if (run.conclusion === 'failure' || job.conclusion === 'failure') status = 'failed';
+        else if (run.status === 'in_progress') status = 'in_progress';
+        else if (run.status === 'queued') status = 'queued';
+
+        events.push({
+          client_name: client,
+          event_stack: stack,
+          frontend_version: stack === 'F' ? match[1] : 'unknown',
+          backend_version: stack === 'B' ? match[1] : 'unknown',
+          status,
+          deployed_by: run.actor?.login || 'system',
+          frontend_deployed_at: stack === 'F' ? (job.completed_at || run.created_at) : null,
+          backend_deployed_at: stack === 'B' ? (job.completed_at || run.created_at) : null,
+          run_id: runIdStr,
+          event_time: job.completed_at || run.created_at,
+          is_deployable_to_client: 0,
+          isNew: !knownRunsMap.has(runIdStr)
         });
       }
-    } catch (e) {}
-  }
-
-  return eventsByClient;
-}
-
-/**
- * Fetch raw deployment history from GitHub Backend repository
- */
-async function fetchBackendRawData(token) {
-  const repo = process.env.GITHUB_BACKEND_REPO || (process.env.GITHUB_REPO ? process.env.GITHUB_REPO.replace(/-frontend$/, '-backend') : '') || 'pride-erp-local/pride-erp-backend';
-  const effectiveToken = token || process.env.GITHUB_TOKEN || '';
-  const eventsByClient = {};
-
-  const headers = {
-    'User-Agent': 'Pridebook-DB-Sync',
-    'Accept': 'application/vnd.github.v3+json'
-  };
-  if (effectiveToken) headers['Authorization'] = `token ${effectiveToken.trim()}`;
-
-  if (effectiveToken) {
-    try {
-      let runs = [];
-      // 1. Target the specific Release Deploy workflow for backend deployments
-      const workflowUrl = `https://api.github.com/repos/${repo}/actions/workflows/release-deploy.yml/runs?per_page=40`;
-      const res = await fetch(workflowUrl, { headers });
-      if (res.ok) {
-        const data = await res.json();
-        runs = data.workflow_runs || [];
-      } else {
-        // Fallback to general workflow runs
-        const fallbackUrl = `https://api.github.com/repos/${repo}/actions/runs?per_page=40`;
-        const fallbackRes = await fetch(fallbackUrl, { headers });
-        if (fallbackRes.ok) {
-          const data = await fallbackRes.json();
-          runs = (data.workflow_runs || []).filter(r => r.name && r.name.includes('Release Deploy'));
-        }
-      }
-
-      await Promise.all(runs.map(async (run) => {
-        try {
-          let jobs = workflowJobsCache.get(run.id);
-          if (!jobs) {
-            const jobsRes = await fetch(run.jobs_url, { headers });
-            if (!jobsRes.ok) return;
-            const jobsData = await jobsRes.json();
-            jobs = jobsData.jobs || [];
-            if (run.status === 'completed') {
-              workflowJobsCache.set(run.id, jobs);
-            }
-          }
-          for (const job of jobs) {
-            const match = job.name.match(/(?:Deploy|Validate release)\s+(v[0-9.]+)\s+(?:to|for)\s+([a-zA-Z0-9_-]+)/i);
-            if (match && job.name.startsWith('Deploy')) {
-              const client = match[2].toLowerCase().trim();
-              if (!eventsByClient[client]) eventsByClient[client] = [];
-              eventsByClient[client].push({
-                stack: 'B',
-                version: match[1],
-                timestamp: job.completed_at || run.created_at,
-                deployed_by: run.actor?.login || 'system',
-                status: job.conclusion === 'success' ? 'success' : (job.conclusion || 'pending'),
-                run_id: String(run.id)
-              });
-            }
-          }
-        } catch (e) {}
-      }));
-    } catch (err) {
-      console.warn(`[Sync] Could not inspect backend workflow runs:`, err.message);
     }
   }
 
-  return eventsByClient;
+  return events;
 }
 
 /**
- * Internal Sync Engine:
- * 1. Checks GitHub deployment data internally.
- * 2. Compares against DB to detect new clients (auto-onboard) or version mismatches.
- * 3. Updates master table SA_DEPLOYMENT_TRACKER and child table SA_DEPLOYMENT_TRACKER_DTL.
- * 4. ALWAYS queries and returns the data directly from the Database.
+ * Bootstrap initial database if detail table is completely empty
+ */
+async function bootstrapInitialDatabase(token) {
+  const repoF = process.env.GITHUB_FRONTEND_REPO || process.env.GITHUB_REPO || 'pride-erp-local/pride-erp-frontend';
+  const repoB = process.env.GITHUB_BACKEND_REPO || (process.env.GITHUB_REPO ? process.env.GITHUB_REPO.replace(/-frontend$/, '-backend') : '') || 'pride-erp-local/pride-erp-backend';
+  const emptyMap = new Map();
+
+  const [fEvents, bEvents] = await Promise.all([
+    fetchIncrementalWorkflowRuns({ repo: repoF, stack: 'F', token, knownRunsMap: emptyMap }),
+    fetchIncrementalWorkflowRuns({ repo: repoB, stack: 'B', token, knownRunsMap: emptyMap })
+  ]);
+
+  const allEvents = [...fEvents, ...bEvents].sort((a, b) => new Date(a.event_time) - new Date(b.event_time));
+  if (allEvents.length > 0) {
+    const db = getSqliteDb();
+    if (db) {
+      for (const ev of allEvents) {
+        let trackerNo = await upsertDeployment({
+          client_name: ev.client_name,
+          frontend_version: ev.event_stack === 'F' ? ev.frontend_version : 'unknown',
+          backend_version: ev.event_stack === 'B' ? ev.backend_version : 'unknown',
+          status: ev.status
+        });
+        db.prepare(`
+          INSERT INTO SA_DEPLOYMENT_TRACKER_DTL (
+            deployment_tracker_no, client_name, event_stack, frontend_version,
+            backend_version, status, deployed_by, frontend_deployed_at,
+            backend_deployed_at, run_id, event_time, is_deployable_to_client, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+        `).run(
+          trackerNo,
+          ev.client_name,
+          ev.event_stack,
+          ev.frontend_version,
+          ev.backend_version,
+          ev.status,
+          ev.deployed_by,
+          ev.frontend_deployed_at,
+          ev.backend_deployed_at,
+          ev.run_id,
+          ev.event_time,
+          new Date().toISOString()
+        );
+      }
+    }
+
+    const oracle = getOracleModule();
+    if (oracle) {
+      try {
+        await oracle.syncHistoryEvents(allEvents);
+      } catch (_) {}
+    }
+
+    await refreshMasterClientsFromDtl();
+  }
+}
+
+/**
+ * Standard Incremental DB Sync:
+ * - Checks GitHub for only new runs not yet in DB, or runs with pending status.
+ * - Does NOT scan entire historical runs or hit rate limits.
+ * - ALWAYS returns data directly from the Database.
  */
 async function getDeploymentsWithSync(options = {}) {
   const token = options.token || process.env.GITHUB_TOKEN || '';
   const forceSync = options.forceSync === true;
   const now = Date.now();
 
-  // Rate-limit automated checks to at most once every 15 seconds unless forced
-  const shouldCheckGitHub = forceSync || (now - lastSyncCheckTime > 15000);
+  // Rate-limit automated checks to at most once every 10 seconds unless forced
+  const shouldCheckGitHub = forceSync || (now - lastSyncCheckTime > 10000);
 
   if (shouldCheckGitHub) {
     lastSyncCheckTime = now;
     try {
-      // 1. Fetch current database state
-      const currentDbDeployments = await getAllDeployments();
-      const currentDbMap = new Map();
-      for (const row of currentDbDeployments) {
-        currentDbMap.set((row.client_name || '').toLowerCase(), row);
-      }
+      const knownRunsMap = await getKnownRunsMap();
 
-      // 2. Fetch latest GitHub data internally
-      const frontendEvents = await fetchFrontendRawData(token);
-      const backendEvents = await fetchBackendRawData(token);
+      if (knownRunsMap.size === 0) {
+        console.log('[DB Sync] Blank DB detected. Bootstrapping initial records from GitHub...');
+        await bootstrapInitialDatabase(token);
+      } else {
+        const repoF = process.env.GITHUB_FRONTEND_REPO || process.env.GITHUB_REPO || 'pride-erp-local/pride-erp-frontend';
+        const repoB = process.env.GITHUB_BACKEND_REPO || (process.env.GITHUB_REPO ? process.env.GITHUB_REPO.replace(/-frontend$/, '-backend') : '') || 'pride-erp-local/pride-erp-backend';
 
-      const standardClients = ['stage', 'shinshin', 'bengal', 'karupannya', 'ananta-uat', 'ananta-live'];
-      const allClientNames = Array.from(new Set([
-        ...standardClients,
-        ...Object.keys(frontendEvents),
-        ...Object.keys(backendEvents)
-      ]));
+        // Incremental: Only fetch runs not in DB or non-terminal
+        const [fNew, bNew] = await Promise.all([
+          fetchIncrementalWorkflowRuns({ repo: repoF, stack: 'F', token, knownRunsMap }),
+          fetchIncrementalWorkflowRuns({ repo: repoB, stack: 'B', token, knownRunsMap })
+        ]);
 
-      let isMismatch = false;
-      const calculatedClients = [];
-      const fullTimeline = [];
+        const newEvents = [...fNew, ...bNew];
 
-      for (const client of allClientNames) {
-        const dbRow = currentDbMap.get(client);
-        if (!dbRow) {
-          // New client onboarded! Not in database yet
-          isMismatch = true;
-        }
+        if (newEvents.length > 0) {
+          console.log(`[DB Incremental Sync] Processing ${newEvents.length} new or updated run(s) from GitHub...`);
 
-        const rawF = (frontendEvents[client] || []).filter(e => e.timestamp);
-        const rawB = (backendEvents[client] || []).filter(e => e.timestamp);
-
-        const combinedEvents = [...rawF, ...rawB].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-
-        let curF = { version: 'unknown', deployed_at: null, deployed_by: null, run_id: null, status: 'pending_first_deploy' };
-        let curB = { version: 'unknown', deployed_at: null, deployed_by: null, run_id: null, status: 'pending_first_deploy' };
-
-        for (const ev of combinedEvents) {
-          if (ev.stack === 'F') {
-            curF = {
-              version: ev.version,
-              deployed_at: ev.timestamp,
-              deployed_by: ev.deployed_by,
-              run_id: ev.run_id,
-              status: ev.status
-            };
-          } else if (ev.stack === 'B') {
-            curB = {
-              version: ev.version,
-              deployed_at: ev.timestamp,
-              deployed_by: ev.deployed_by,
-              run_id: ev.run_id,
-              status: ev.status
-            };
+          // 1. Sync Oracle detail table if active
+          const oracle = getOracleModule();
+          if (oracle) {
+            try {
+              await oracle.syncHistoryEvents(newEvents);
+            } catch (e) {
+              console.warn('[Oracle Incremental Sync Warn]:', e.message);
+            }
           }
 
-          fullTimeline.push({
-            client_name: client,
-            event_stack: ev.stack,
-            frontend_version: curF.version,
-            backend_version: curB.version,
-            frontend_deployed_at: curF.deployed_at,
-            backend_deployed_at: curB.deployed_at,
-            deployed_by: ev.deployed_by || 'system',
-            status: ev.status || 'success',
-            run_id: ev.run_id,
-            event_time: ev.timestamp
-          });
-        }
+          // 2. Sync SQLite detail table
+          const db = getSqliteDb();
+          if (db) {
+            try {
+              const masterRows = db.prepare('SELECT deployment_tracker_no, LOWER(client_name) AS name FROM SA_DEPLOYMENT_TRACKER').all();
+              const clientTrackerMap = {};
+              for (const r of masterRows) clientTrackerMap[r.name] = r.deployment_tracker_no;
 
-        // Never regress known database versions to 'unknown' if GitHub returns no events
-        if (curF.version === 'unknown' && dbRow && dbRow.frontend_version && dbRow.frontend_version !== 'unknown') {
-          curF.version = dbRow.frontend_version;
-          curF.deployed_at = dbRow.frontend_deployed_at;
-          curF.deployed_by = dbRow.deployed_by;
-          curF.run_id = dbRow.frontend_run_id;
-        }
-        if (curB.version === 'unknown' && dbRow && dbRow.backend_version && dbRow.backend_version !== 'unknown') {
-          curB.version = dbRow.backend_version;
-          curB.deployed_at = dbRow.backend_deployed_at;
-          curB.deployed_by = dbRow.deployed_by;
-          curB.run_id = dbRow.backend_run_id;
-        }
+              const insertDtlStmt = db.prepare(`
+                INSERT INTO SA_DEPLOYMENT_TRACKER_DTL (
+                  deployment_tracker_no, client_name, event_stack, frontend_version,
+                  backend_version, status, deployed_by, frontend_deployed_at,
+                  backend_deployed_at, run_id, event_time, is_deployable_to_client, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+              `);
 
-        const overallStatus = (curF.status === 'success' || curB.status === 'success')
-          ? 'success'
-          : (curF.status || curB.status || 'pending_first_deploy');
+              const updateDtlStmt = db.prepare(`
+                UPDATE SA_DEPLOYMENT_TRACKER_DTL 
+                SET status = ?, frontend_version = ?, backend_version = ?, deployed_by = ?
+                WHERE run_id = ?
+              `);
 
-        const latestRecord = {
-          client_name: client,
-          frontend_version: curF.version,
-          backend_version: curB.version,
-          status: overallStatus,
-          deployed_by: curF.deployed_by || curB.deployed_by || 'system',
-          frontend_deployed_at: curF.deployed_at,
-          backend_deployed_at: curB.deployed_at,
-          frontend_run_id: curF.run_id,
-          backend_run_id: curB.run_id,
-          is_deployable_to_client: dbRow ? dbRow.is_deployable_to_client : 0
-        };
+              for (const ev of newEvents) {
+                const client = ev.client_name.toLowerCase();
+                let trackerNo = clientTrackerMap[client];
+                if (!trackerNo) {
+                  trackerNo = await upsertDeployment({
+                    client_name: client,
+                    frontend_version: ev.event_stack === 'F' ? ev.frontend_version : 'unknown',
+                    backend_version: ev.event_stack === 'B' ? ev.backend_version : 'unknown',
+                    status: ev.status
+                  });
+                  clientTrackerMap[client] = trackerNo;
+                }
 
-        calculatedClients.push(latestRecord);
-
-        if (dbRow) {
-          if (
-            dbRow.frontend_version !== latestRecord.frontend_version ||
-            dbRow.backend_version !== latestRecord.backend_version ||
-            dbRow.frontend_deployed_at !== latestRecord.frontend_deployed_at ||
-            dbRow.backend_deployed_at !== latestRecord.backend_deployed_at ||
-            dbRow.status !== latestRecord.status
-          ) {
-            isMismatch = true;
-          }
-        }
-      }
-
-      // Check if DB is empty or has mismatches
-      if (isMismatch || forceSync || currentDbDeployments.length === 0) {
-        console.log(`[DB Sync] Mismatch or sync requested. Syncing ${calculatedClients.length} clients to database...`);
-
-        // 1. Sync Master Table SA_DEPLOYMENT_TRACKER
-        for (const clientRecord of calculatedClients) {
-          await upsertDeployment(clientRecord);
-        }
-
-        // 2. Sync Child Table SA_DEPLOYMENT_TRACKER_DTL on Oracle
-        const oracle = getOracleModule();
-        if (oracle) {
-          try {
-            await oracle.syncHistoryEvents(fullTimeline);
-          } catch (e) {
-            console.warn('[Oracle History Sync Warn]:', e.message);
-          }
-        }
-
-        // 3. Sync Child Table on SQLite
-        const db = getSqliteDb();
-        if (db) {
-          try {
-            const masterRows = db.prepare('SELECT deployment_tracker_no, LOWER(client_name) AS name FROM SA_DEPLOYMENT_TRACKER').all();
-            const clientTrackerMap = {};
-            for (const r of masterRows) clientTrackerMap[r.name] = r.deployment_tracker_no;
-
-            const insertDtlStmt = db.prepare(`
-              INSERT INTO SA_DEPLOYMENT_TRACKER_DTL (
-                deployment_tracker_no, client_name, event_stack, frontend_version,
-                backend_version, status, deployed_by, frontend_deployed_at,
-                backend_deployed_at, run_id, event_time, is_deployable_to_client, created_at
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `);
-
-            for (const ev of fullTimeline) {
-              const trackerNo = clientTrackerMap[ev.client_name.toLowerCase()];
-              if (trackerNo) {
-                const existing = db.prepare(`
-                  SELECT deployment_tracker_dtl_no, status FROM SA_DEPLOYMENT_TRACKER_DTL 
-                  WHERE deployment_tracker_no = ? AND event_stack = ? AND (run_id = ? OR event_time = ?)
-                `).get(trackerNo, ev.event_stack, ev.run_id || '', ev.event_time);
-
-                if (!existing) {
+                if (ev.isNew) {
                   insertDtlStmt.run(
                     trackerNo,
                     ev.client_name,
@@ -932,36 +904,34 @@ async function getDeploymentsWithSync(options = {}) {
                     ev.deployed_by,
                     ev.frontend_deployed_at,
                     ev.backend_deployed_at,
-                    ev.run_id ? String(ev.run_id) : null,
+                    ev.run_id,
                     ev.event_time,
-                    ev.is_deployable_to_client !== undefined ? parseInt(ev.is_deployable_to_client, 10) : 0,
                     new Date().toISOString()
                   );
-                } else if (existing.status !== ev.status && ev.status) {
-                  db.prepare(`
-                    UPDATE SA_DEPLOYMENT_TRACKER_DTL 
-                    SET status = ?, frontend_version = ?, backend_version = ?, deployed_by = ?
-                    WHERE deployment_tracker_dtl_no = ?
-                  `).run(ev.status, ev.frontend_version, ev.backend_version, ev.deployed_by || 'system', existing.deployment_tracker_dtl_no);
+                } else {
+                  updateDtlStmt.run(ev.status, ev.frontend_version, ev.backend_version, ev.deployed_by || 'system', ev.run_id);
                 }
               }
+            } catch (sqliteErr) {
+              console.warn('[SQLite Incremental Sync Warn]:', sqliteErr.message);
             }
-          } catch (sqliteErr) {
-            console.warn('[SQLite History Sync Warn]:', sqliteErr.message);
           }
-        }
 
-        // Update sorted memory cache
-        mergedHistoryCache = fullTimeline.sort((a, b) => new Date(b.event_time) - new Date(a.event_time));
-      } else {
-        // If DB is already up-to-date and memory cache is empty, populate cache
-        if (mergedHistoryCache.length === 0 && fullTimeline.length > 0) {
-          mergedHistoryCache = fullTimeline.sort((a, b) => new Date(b.event_time) - new Date(a.event_time));
+          // Update master table for any affected clients
+          const affectedClients = Array.from(new Set(newEvents.map(e => e.client_name.toLowerCase())));
+          await refreshMasterClientsFromDtl(affectedClients);
         }
       }
     } catch (err) {
-      console.warn('[Internal GitHub Check Warn]:', err.message);
+      console.warn('[DB Incremental Sync Warn]:', err.message);
     }
+  }
+
+  // Ensure master table is populated if it ever lost sync
+  const currentMaster = await getAllDeployments();
+  const needsMasterRefresh = currentMaster.some(m => m.client_name !== 'stage' && (m.frontend_version === 'unknown' || m.status === 'pending_first_deploy'));
+  if (needsMasterRefresh) {
+    await refreshMasterClientsFromDtl();
   }
 
   // 4. ALWAYS return data directly from the Database!
@@ -976,7 +946,7 @@ async function getDeploymentsWithSync(options = {}) {
     deployable_count: finalDeployments.filter(c => c.is_deployable_to_client === 0).length,
     issue_count: finalDeployments.filter(c => c.is_deployable_to_client === 1).length,
     data: finalDeployments,
-    history: (finalHistory && finalHistory.length > 0) ? finalHistory : mergedHistoryCache,
+    history: finalHistory || [],
     synced_at: new Date().toISOString()
   };
 }
@@ -998,6 +968,9 @@ function getActiveDbType() {
 module.exports = {
   getAllDeployments,
   getDeploymentHistory,
+  getKnownRunsMap,
+  updateHistoryStatus,
+  refreshMasterClientsFromDtl,
   updateDeployableFlag,
   updateHistoryDeployableFlag,
   upsertDeployment,

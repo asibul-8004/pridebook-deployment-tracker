@@ -266,6 +266,14 @@
       font-size: 0.9rem;
       letter-spacing: 0.05em;
     }
+    .spin-anim {
+      animation: spinAnim 0.75s linear infinite;
+      display: inline-block;
+    }
+    @keyframes spinAnim {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
     .toast-container {
       position: fixed;
       bottom: 24px;
@@ -380,6 +388,26 @@
       backend: { finished: false, total: '00:00:00' }
     };
 
+    // Live Recent Runs Auto-Polling
+    let recentRunsPollInterval = null;
+    let lastRecentRunsJson = '';
+
+    function startRecentRunsPolling() {
+      if (recentRunsPollInterval) clearInterval(recentRunsPollInterval);
+      recentRunsPollInterval = setInterval(() => {
+        if (isSessionAuthenticated) {
+          fetchRecentRuns(false);
+        }
+      }, 3500);
+    }
+
+    function stopRecentRunsPolling() {
+      if (recentRunsPollInterval) {
+        clearInterval(recentRunsPollInterval);
+        recentRunsPollInterval = null;
+      }
+    }
+
     let currentClient = '';
     let currentFrontendTag = '';
     let currentBackendTag = '';
@@ -418,6 +446,7 @@
     function onSessionExpired() {
       if (!isSessionAuthenticated) return;
       isSessionAuthenticated = false;
+      stopRecentRunsPolling();
       if (sessionTimeoutTimer) clearTimeout(sessionTimeoutTimer);
       if (sessionCheckHeartbeat) clearInterval(sessionCheckHeartbeat);
 
@@ -732,6 +761,7 @@
     }
 
     function logout() {
+      stopRecentRunsPolling();
       sessionStorage.removeItem('pride_token');
       sessionStorage.removeItem('pride_deploy_user');
       sessionStorage.removeItem('pride_expires_at');
@@ -994,10 +1024,18 @@
 
           <!-- Recent GitHub Release Deploy Runs Table (Matching Project Style) -->
           <div class="card shadow-sm mb-4">
-            <div class="card-header py-3 d-flex align-items-center justify-content-between">
-              <h6 class="card-title mb-0 fw-bold text-light">
-                <i class="bi bi-journal-code me-2 text-primary"></i> Recent GitHub Release Deploy Runs
-              </h6>
+            <div class="card-header py-3 d-flex align-items-center justify-content-between flex-wrap gap-2">
+              <div class="d-flex align-items-center gap-2">
+                <h6 class="card-title mb-0 fw-bold text-light">
+                  <i class="bi bi-journal-code me-2 text-primary"></i> Recent GitHub Release Deploy Runs
+                </h6>
+                <span class="status-badge success ms-1" style="font-size: 0.65rem; padding: 2px 8px;">
+                  <span class="badge-dot pulse-badge"></span> LIVE
+                </span>
+              </div>
+              <button class="btn btn-sm btn-outline-secondary rounded-pill px-3" onclick="manualRefreshRuns()" id="refreshRunsBtn" title="Refresh live runs now">
+                <i class="bi bi-arrow-clockwise me-1" id="refreshRunsIcon"></i> Refresh
+              </button>
             </div>
             <div class="table-responsive">
               <table class="project-table align-middle">
@@ -1023,7 +1061,8 @@
 
       loadConfig();
       fetchTags();
-      fetchRecentRuns();
+      fetchRecentRuns(true);
+      startRecentRunsPolling();
       onInputsChanged();
     }
 
@@ -1520,21 +1559,39 @@
       }
     }
 
-    async function fetchRecentRuns() {
+    async function manualRefreshRuns() {
+      const icon = document.getElementById('refreshRunsIcon');
+      if (icon) icon.classList.add('spin-anim');
+      await fetchRecentRuns(true);
+      setTimeout(() => {
+        if (icon) icon.classList.remove('spin-anim');
+      }, 500);
+    }
+
+    async function fetchRecentRuns(force = false) {
       try {
         const res = await fetch('/api/deploy/recent');
         if (!res.ok) return;
         const data = await res.json();
         const tbody = document.getElementById('recentRunsBody');
         if (!tbody) return;
+
+        const runs = Array.isArray(data.data) ? data.data : [];
+        const jsonStr = JSON.stringify(runs);
+
+        // Anti-flicker diff check: do not touch DOM if data has not changed
+        if (!force && jsonStr === lastRecentRunsJson) {
+          return;
+        }
+        lastRecentRunsJson = jsonStr;
         tbody.innerHTML = '';
 
-        if (!data.data || data.data.length === 0) {
+        if (runs.length === 0) {
           tbody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-muted">No recent deployment runs found</td></tr>';
           return;
         }
 
-        data.data.forEach(run => {
+        runs.forEach(run => {
           const tr = document.createElement('tr');
           const isSuccess = run.conclusion === 'success' || run.status === 'success' || run.status === 'completed';
           const isCancelled = run.conclusion === 'cancelled' || run.status === 'cancelled';
@@ -1573,8 +1630,41 @@
           `;
           tbody.appendChild(tr);
         });
+
+        syncCardsWithActiveRuns(runs);
       } catch (e) {
         console.warn('Recent runs err:', e);
+      }
+    }
+
+    function syncCardsWithActiveRuns(runs) {
+      if (!runs || !Array.isArray(runs) || activePollTimer) {
+        return;
+      }
+
+      const activeF = runs.find(r => r.stack === 'Frontend' && (r.status === 'in_progress' || r.status === 'queued'));
+      const activeB = runs.find(r => r.stack === 'Backend' && (r.status === 'in_progress' || r.status === 'queued'));
+
+      if (activeF) {
+        setCardState('frontend', activeF.status === 'in_progress' ? 'deploying' : 'queued', {
+          client: activeF.client,
+          tag: activeF.version || 'v1.x',
+          job: activeF.status === 'in_progress' ? 'Executing deployment containers...' : 'Waiting in runner queue...',
+          progress: activeF.status === 'in_progress' ? 65 : 25,
+          run_url: activeF.run_url,
+          run_id: activeF.id
+        });
+      }
+
+      if (activeB) {
+        setCardState('backend', activeB.status === 'in_progress' ? 'deploying' : 'queued', {
+          client: activeB.client,
+          tag: activeB.version || 'v2.x',
+          job: activeB.status === 'in_progress' ? 'Executing deployment containers...' : 'Waiting in runner queue...',
+          progress: activeB.status === 'in_progress' ? 65 : 25,
+          run_url: activeB.run_url,
+          run_id: activeB.id
+        });
       }
     }
 

@@ -587,12 +587,18 @@ async function getRecentDeployments(token) {
         }
         if (live.actor) actor = live.actor;
         if (live.run_url) runUrl = live.run_url;
+
+        // Auto-heal DB status if record in DB was pending but is now finished on GitHub
+        if (h.status === 'pending' && live.conclusion) {
+          db.updateHistoryStatus(runIdStr, live.conclusion).catch(() => {});
+        }
       } else if (status === 'pending') {
         // If run is older than 5 minutes and marked pending in DB but not active in GitHub, treat as completed
         const eventAge = Date.now() - new Date(h.event_time || h.frontend_deployed_at || h.backend_deployed_at || 0).getTime();
         if (eventAge > 5 * 60 * 1000) {
           status = 'success';
           conclusion = 'success';
+          db.updateHistoryStatus(runIdStr, 'success').catch(() => {});
         }
       }
 

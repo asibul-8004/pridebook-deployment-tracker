@@ -1005,7 +1005,6 @@
                   <tr>
                     <th scope="col" style="padding-left: 1.25rem;">Stack</th>
                     <th scope="col">Client Box</th>
-                    <th scope="col">Workflow Run</th>
                     <th scope="col">Status</th>
                     <th scope="col">Triggered By</th>
                     <th scope="col" style="padding-right: 1.25rem;">Created At</th>
@@ -1013,7 +1012,7 @@
                 </thead>
                 <tbody id="recentRunsBody">
                   <tr>
-                    <td colspan="6" class="text-center py-4 text-muted">Loading recent runs...</td>
+                    <td colspan="5" class="text-center py-4 text-muted">Loading recent runs...</td>
                   </tr>
                 </tbody>
               </table>
@@ -1531,7 +1530,7 @@
         tbody.innerHTML = '';
 
         if (!data.data || data.data.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted">No recent deployment runs found</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-muted">No recent deployment runs found</td></tr>';
           return;
         }
 
@@ -1557,19 +1556,16 @@
 
           tr.innerHTML = `
             <td style="padding-left: 1.25rem;">
-              <span class="stack-avatar ${run.stack.toLowerCase()[0]} me-2">${run.stack[0]}</span>
-              <strong>${escapeHtml(run.stack)}</strong>
+              <a href="${run.run_url}" target="_blank" class="text-decoration-none text-light fw-bold d-inline-flex align-items-center" title="Open GitHub Actions run #${run.run_number || run.id}">
+                <span class="stack-avatar ${run.stack.toLowerCase()[0]} me-2">${run.stack[0]}</span>
+                <span>${escapeHtml(run.stack)}</span>
+                <i class="bi bi-box-arrow-up-right ms-1 text-secondary" style="font-size: 0.72rem;"></i>
+              </a>
             </td>
             <td>
               <span class="client-box-tag">
                 ${escapeHtml(run.client || '-')}
               </span>
-            </td>
-            <td>
-              <a href="${run.run_url}" target="_blank" class="text-decoration-none text-primary fw-semibold" title="Open GitHub Actions run">
-                <span>${escapeHtml(run.name)} #${run.run_number || run.id}</span>
-                <i class="bi bi-box-arrow-up-right ms-1 small"></i>
-              </a>
             </td>
             <td>${badgeHtml}</td>
             <td class="text-secondary small">${escapeHtml(run.actor || 'system')}</td>

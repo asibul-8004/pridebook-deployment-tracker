@@ -917,7 +917,7 @@ async function getDeploymentsWithSync(options = {}) {
               const trackerNo = clientTrackerMap[ev.client_name.toLowerCase()];
               if (trackerNo) {
                 const existing = db.prepare(`
-                  SELECT 1 FROM SA_DEPLOYMENT_TRACKER_DTL 
+                  SELECT deployment_tracker_dtl_no, status FROM SA_DEPLOYMENT_TRACKER_DTL 
                   WHERE deployment_tracker_no = ? AND event_stack = ? AND (run_id = ? OR event_time = ?)
                 `).get(trackerNo, ev.event_stack, ev.run_id || '', ev.event_time);
 
@@ -937,6 +937,12 @@ async function getDeploymentsWithSync(options = {}) {
                     ev.is_deployable_to_client !== undefined ? parseInt(ev.is_deployable_to_client, 10) : 0,
                     new Date().toISOString()
                   );
+                } else if (existing.status !== ev.status && ev.status) {
+                  db.prepare(`
+                    UPDATE SA_DEPLOYMENT_TRACKER_DTL 
+                    SET status = ?, frontend_version = ?, backend_version = ?, deployed_by = ?
+                    WHERE deployment_tracker_dtl_no = ?
+                  `).run(ev.status, ev.frontend_version, ev.backend_version, ev.deployed_by || 'system', existing.deployment_tracker_dtl_no);
                 }
               }
             }

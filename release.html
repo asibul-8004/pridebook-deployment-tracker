@@ -1536,10 +1536,10 @@
 
         data.data.forEach(run => {
           const tr = document.createElement('tr');
-          const isSuccess = run.conclusion === 'success';
-          const isCancelled = run.conclusion === 'cancelled';
-          const isFailed = run.conclusion === 'failure' || run.conclusion === 'timed_out';
-          const isPending = !run.conclusion && (run.status === 'in_progress' || run.status === 'queued');
+          const isSuccess = run.conclusion === 'success' || run.status === 'success' || run.status === 'completed';
+          const isCancelled = run.conclusion === 'cancelled' || run.status === 'cancelled';
+          const isFailed = run.conclusion === 'failure' || run.conclusion === 'timed_out' || run.status === 'failed';
+          const isPending = !isSuccess && !isCancelled && !isFailed && (run.status === 'in_progress' || run.status === 'queued' || run.status === 'pending' || run.conclusion === 'pending');
 
           let badgeHtml = '';
           if (isSuccess) {
@@ -1549,7 +1549,7 @@
           } else if (isFailed) {
             badgeHtml = `<span class="status-badge failed"><span class="badge-dot"></span> FAILED</span>`;
           } else if (isPending) {
-            badgeHtml = `<span class="status-badge pending"><span class="badge-dot"></span> ${escapeHtml((run.status || 'in progress').toUpperCase())}</span>`;
+            badgeHtml = `<span class="status-badge pending"><span class="badge-dot"></span> ${escapeHtml((run.status || 'pending').toUpperCase())}</span>`;
           } else {
             badgeHtml = `<span class="status-badge cancelled"><span class="badge-dot"></span> ${escapeHtml((run.conclusion || run.status || 'unknown').toUpperCase())}</span>`;
           }

@@ -494,69 +494,142 @@ async function getDeployStatus({ client, frontend_tag, backend_tag, token }) {
 }
 
 /**
- * Fetch recent runs from both repos for display on the release page
+ * Fetch recent runs from both repos for display on the release page.
+ * Correlates live GitHub Actions workflow runs (authoritative status) with deployment history metadata.
  */
 async function getRecentDeployments(token) {
   const fRepo = getEnv('GITHUB_FRONTEND_REPO') || getEnv('GITHUB_REPO') || 'pride-erp-local/pride-erp-frontend';
   const bRepo = getEnv('GITHUB_BACKEND_REPO') || (getEnv('GITHUB_REPO') ? getEnv('GITHUB_REPO').replace(/-frontend$/, '-backend') : '') || 'pride-erp-local/pride-erp-backend';
+  const effectiveToken = token || process.env.GITHUB_TOKEN || '';
+  const headers = getHeaders(effectiveToken);
 
+  // 1. Fetch live runs from GitHub Actions (authoritative status)
+  const liveRunsMap = new Map();
+  try {
+    const [fRes, bRes] = await Promise.all([
+      fetch(`https://api.github.com/repos/${fRepo}/actions/workflows/release-deploy.yml/runs?per_page=15`, { headers }).catch(() => null),
+      fetch(`https://api.github.com/repos/${bRepo}/actions/workflows/release-deploy.yml/runs?per_page=15`, { headers }).catch(() => null)
+    ]);
+
+    if (fRes && fRes.ok) {
+      const fData = await fRes.json();
+      for (const r of (fData.workflow_runs || [])) {
+        liveRunsMap.set(String(r.id), {
+          stack: 'Frontend',
+          status: r.status,
+          conclusion: r.conclusion,
+          run_number: r.run_number,
+          actor: r.actor ? r.actor.login : 'system',
+          run_url: r.html_url,
+          created_at: r.created_at
+        });
+      }
+    }
+    if (bRes && bRes.ok) {
+      const bData = await bRes.json();
+      for (const r of (bData.workflow_runs || [])) {
+        liveRunsMap.set(String(r.id), {
+          stack: 'Backend',
+          status: r.status,
+          conclusion: r.conclusion,
+          run_number: r.run_number,
+          actor: r.actor ? r.actor.login : 'system',
+          run_url: r.html_url,
+          created_at: r.created_at
+        });
+      }
+    }
+  } catch (err) {
+    console.warn('[Recent Runs GitHub API fetch warn]:', err.message);
+  }
+
+  // 2. Fetch history records from Database (which contain client_name, version, etc.)
+  let dbHistory = [];
   try {
     const history = await db.getDeploymentHistory();
     if (Array.isArray(history) && history.length > 0) {
-      return history.slice(0, 15).map(h => {
-        const isBackend = h.event_stack === 'B';
-        const repo = isBackend ? bRepo : fRepo;
-        const version = isBackend ? h.backend_version : h.frontend_version;
-        return {
-          stack: isBackend ? 'Backend' : 'Frontend',
-          client: (h.client_name || 'stage').toLowerCase(),
-          id: h.run_id || h.deployment_tracker_dtl_no,
-          run_number: h.run_id ? String(h.run_id).slice(-4) : h.deployment_tracker_dtl_no,
-          name: isBackend ? 'Release Deploy (API)' : 'Release Deploy',
-          version: version || 'unknown',
-          status: h.status || 'success',
-          conclusion: h.status || 'success',
-          run_url: h.run_id ? `https://github.com/${repo}/actions/runs/${h.run_id}` : '#',
-          actor: h.deployed_by || 'system',
-          created_at: h.event_time || h.frontend_deployed_at || h.backend_deployed_at || new Date().toISOString()
-        };
-      });
+      dbHistory = history;
     }
   } catch (err) {
     console.warn('[Recent Runs DB fallback warn]:', err.message);
   }
 
-  const headers = getHeaders(token);
-  async function fetchRecent(repo, stack) {
-    try {
-      const url = `https://api.github.com/repos/${repo}/actions/workflows/release-deploy.yml/runs?per_page=6`;
-      const res = await fetch(url, { headers });
-      if (!res.ok) return [];
-      const data = await res.json();
-      return (data.workflow_runs || []).map(r => ({
-        stack,
-        client: 'stage',
-        id: r.id,
-        run_number: r.run_number,
-        name: r.name,
-        version: '',
-        status: r.status,
-        conclusion: r.conclusion,
-        run_url: r.html_url,
-        actor: r.actor ? r.actor.login : 'system',
-        created_at: r.created_at
-      }));
-    } catch (e) {
-      return [];
-    }
+  if (dbHistory.length > 0) {
+    return dbHistory.slice(0, 15).map(h => {
+      const isBackend = h.event_stack === 'B';
+      const repo = isBackend ? bRepo : fRepo;
+      const version = isBackend ? h.backend_version : h.frontend_version;
+      const runIdStr = h.run_id ? String(h.run_id) : '';
+
+      let status = h.status || 'success';
+      let conclusion = h.status || 'success';
+      let actor = h.deployed_by || 'system';
+      let runUrl = h.run_id ? `https://github.com/${repo}/actions/runs/${h.run_id}` : '#';
+
+      // If GitHub live status is available for this run, use the authoritative live status
+      if (runIdStr && liveRunsMap.has(runIdStr)) {
+        const live = liveRunsMap.get(runIdStr);
+        if (live.conclusion === 'success') {
+          status = 'success';
+          conclusion = 'success';
+        } else if (live.conclusion === 'cancelled') {
+          status = 'cancelled';
+          conclusion = 'cancelled';
+        } else if (live.conclusion === 'failure' || live.conclusion === 'timed_out') {
+          status = 'failed';
+          conclusion = live.conclusion;
+        } else if (live.status === 'in_progress' || live.status === 'queued') {
+          status = live.status;
+          conclusion = null;
+        } else if (live.conclusion) {
+          status = live.conclusion;
+          conclusion = live.conclusion;
+        }
+        if (live.actor) actor = live.actor;
+        if (live.run_url) runUrl = live.run_url;
+      } else if (status === 'pending') {
+        // If run is older than 5 minutes and marked pending in DB but not active in GitHub, treat as completed
+        const eventAge = Date.now() - new Date(h.event_time || h.frontend_deployed_at || h.backend_deployed_at || 0).getTime();
+        if (eventAge > 5 * 60 * 1000) {
+          status = 'success';
+          conclusion = 'success';
+        }
+      }
+
+      return {
+        stack: isBackend ? 'Backend' : 'Frontend',
+        client: (h.client_name || 'stage').toLowerCase(),
+        id: h.run_id || h.deployment_tracker_dtl_no,
+        run_number: h.run_id ? String(h.run_id).slice(-4) : h.deployment_tracker_dtl_no,
+        name: isBackend ? 'Release Deploy (API)' : 'Release Deploy',
+        version: version || 'unknown',
+        status,
+        conclusion,
+        run_url: runUrl,
+        actor,
+        created_at: h.event_time || h.frontend_deployed_at || h.backend_deployed_at || new Date().toISOString()
+      };
+    });
   }
 
-  const [fRuns, bRuns] = await Promise.all([
-    fetchRecent(fRepo, 'Frontend'),
-    fetchRecent(bRepo, 'Backend')
-  ]);
-
-  return [...fRuns, ...bRuns].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  // 3. Fallback if DB history empty: return live GitHub runs directly
+  const fallbackRuns = [];
+  for (const [id, r] of liveRunsMap.entries()) {
+    fallbackRuns.push({
+      stack: r.stack,
+      client: 'stage',
+      id,
+      run_number: r.run_number,
+      name: r.stack === 'Backend' ? 'Release Deploy (API)' : 'Release Deploy',
+      version: '',
+      status: r.conclusion === 'success' ? 'success' : (r.status || 'unknown'),
+      conclusion: r.conclusion,
+      run_url: r.run_url,
+      actor: r.actor,
+      created_at: r.created_at
+    });
+  }
+  return fallbackRuns.sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 15);
 }
 
 module.exports = {

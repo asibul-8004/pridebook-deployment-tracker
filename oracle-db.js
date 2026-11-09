@@ -469,6 +469,27 @@ async function syncHistoryEvents(historyEvents) {
         );
         await conn.commit();
         inserted++;
+      } else {
+        // Update existing row if status or version has changed
+        let updateSql = `UPDATE ${DTL_TABLE_NAME} SET STATUS = :status, FRONTEND_VERSION = :fVer, BACKEND_VERSION = :bVer, DEPLOYED_BY = :deployedBy WHERE DEPLOYMENT_TRACKER_NO = :trackerNo AND EVENT_STACK = :eventStack AND STATUS != :status`;
+        let updateBinds = {
+          status: ev.status || 'success',
+          fVer: ev.frontend_version || 'unknown',
+          bVer: ev.backend_version || 'unknown',
+          deployedBy: ev.deployed_by || 'system',
+          trackerNo,
+          eventStack
+        };
+        if (runId) {
+          updateSql += ` AND (RUN_ID = :runId OR EVENT_TIME = :eventTime)`;
+          updateBinds.runId = runId;
+          updateBinds.eventTime = eventTime;
+        } else {
+          updateSql += ` AND EVENT_TIME = :eventTime`;
+          updateBinds.eventTime = eventTime;
+        }
+        await conn.execute(updateSql, updateBinds, { autoCommit: true });
+        await conn.commit();
       }
     }
   } catch (err) {

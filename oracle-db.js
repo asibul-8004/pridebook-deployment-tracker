@@ -2,8 +2,11 @@
  * Pridebook Version Tracker - Oracle Database Adapter
  * Location: /home/asibul/Pridebook/deployment-tracker/oracle-db.js
  * 
- * Thin Mode driver (no Oracle Instant Client binaries needed).
- * Credentials loaded securely from process.env (.env):
+ * Uses Oracle table: SA_DEPLOYMENT_TRACKER
+ * NOTE: The application does NOT execute any DDL / CREATE TABLE statements.
+ * Table creation is managed separately via DBA / manual scripts.
+ * 
+ * Credentials read securely from process.env (.env):
  * - ORACLE_HOST
  * - ORACLE_PORT
  * - ORACLE_SERVICE_NAME
@@ -17,12 +20,14 @@ const oracledb = require('oracledb');
 oracledb.outFormat = oracledb.OUT_FORMAT_OBJECT;
 oracledb.autoCommit = true;
 
+const TABLE_NAME = process.env.ORACLE_TABLE_NAME || 'SA_DEPLOYMENT_TRACKER';
+
 let pool = null;
 
 function getConnectString() {
   const host = process.env.ORACLE_HOST || '127.0.0.1';
   const port = process.env.ORACLE_PORT || '1521';
-  const serviceName = process.env.ORACLE_SERVICE_NAME || 'XE';
+  const serviceName = process.env.ORACLE_SERVICE_NAME || 'pridedev19c';
   return `${host}:${port}/${serviceName}`;
 }
 
@@ -41,8 +46,6 @@ async function getPool() {
       poolIncrement: 1,
       poolTimeout: 60
     });
-
-    await initSchema();
   }
   return pool;
 }
@@ -53,48 +56,7 @@ async function getConnection() {
 }
 
 /**
- * Initialize Oracle CLIENT_DEPLOYMENTS table
- */
-async function initSchema() {
-  const conn = await pool.getConnection();
-  try {
-    // Check if table exists
-    const checkTable = await conn.execute(
-      `SELECT table_name FROM user_tables WHERE table_name = 'CLIENT_DEPLOYMENTS'`
-    );
-
-    if (checkTable.rows.length === 0) {
-      console.log('[Oracle] Creating CLIENT_DEPLOYMENTS table...');
-      await conn.execute(`
-        CREATE TABLE CLIENT_DEPLOYMENTS (
-          ID NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-          CLIENT_NAME VARCHAR2(100) NOT NULL,
-          STACK VARCHAR2(10) NOT NULL,
-          VERSION VARCHAR2(100) DEFAULT 'unknown',
-          STATUS VARCHAR2(50) DEFAULT 'pending_first_deploy',
-          DEPLOYED_BY VARCHAR2(100) DEFAULT 'system',
-          LAST_DEPLOYED_AT VARCHAR2(100),
-          RUN_ID VARCHAR2(100),
-          IS_DEPLOYABLE_TO_CLIENT NUMBER(1) DEFAULT 0 NOT NULL,
-          ISSUE_NOTES VARCHAR2(500),
-          SYNCED_AT VARCHAR2(100),
-          UPDATED_AT VARCHAR2(100),
-          CONSTRAINT UQ_CLIENT_DEPLOY_STACK UNIQUE (CLIENT_NAME, STACK),
-          CONSTRAINT CK_DEPLOY_STACK CHECK (STACK IN ('F', 'B')),
-          CONSTRAINT CK_DEPLOYABLE_FLAG CHECK (IS_DEPLOYABLE_TO_CLIENT IN (0, 1))
-        )
-      `);
-      console.log('[Oracle] CLIENT_DEPLOYMENTS table created successfully.');
-    }
-  } catch (err) {
-    console.error('[Oracle] Schema init error:', err.message);
-  } finally {
-    await conn.close();
-  }
-}
-
-/**
- * Get all deployments from Oracle, sorted with stage first
+ * Get all deployments from Oracle table SA_DEPLOYMENT_TRACKER
  */
 async function getAllDeployments(filters = {}) {
   const conn = await getConnection();
@@ -113,7 +75,7 @@ async function getAllDeployments(filters = {}) {
         ISSUE_NOTES AS "issue_notes",
         SYNCED_AT AS "synced_at",
         UPDATED_AT AS "updated_at"
-      FROM CLIENT_DEPLOYMENTS
+      FROM ${TABLE_NAME}
       WHERE 1=1
     `;
     const binds = {};
@@ -140,13 +102,19 @@ async function getAllDeployments(filters = {}) {
 
     const result = await conn.execute(sql, binds);
     return result.rows || [];
+  } catch (err) {
+    if (err.message && err.message.includes('ORA-00942')) {
+      console.warn(`[Oracle Notice] Table ${TABLE_NAME} does not exist yet. Please run the table creation DDL script.`);
+      return [];
+    }
+    throw err;
   } finally {
     await conn.close();
   }
 }
 
 /**
- * Upsert deployment record from GitHub sync into Oracle
+ * Upsert deployment record into Oracle table SA_DEPLOYMENT_TRACKER
  * Preserves IS_DEPLOYABLE_TO_CLIENT on existing rows
  */
 async function upsertDeployment(record) {
@@ -156,7 +124,7 @@ async function upsertDeployment(record) {
   const now = new Date().toISOString();
 
   const mergeSql = `
-    MERGE INTO CLIENT_DEPLOYMENTS cd
+    MERGE INTO ${TABLE_NAME} cd
     USING (SELECT :client_name AS client_name, :stack AS stack FROM dual) src
     ON (LOWER(cd.CLIENT_NAME) = LOWER(src.client_name) AND cd.STACK = src.stack)
     WHEN MATCHED THEN
@@ -184,6 +152,12 @@ async function upsertDeployment(record) {
       synced_at: now,
       updated_at: now
     });
+  } catch (err) {
+    if (err.message && err.message.includes('ORA-00942')) {
+      console.warn(`[Oracle Notice] Table ${TABLE_NAME} does not exist yet. Please run the table creation DDL script.`);
+      return;
+    }
+    throw err;
   } finally {
     await conn.close();
   }
@@ -198,13 +172,12 @@ async function updateDeployableFlag(idOrClient, stackOrValue, maybeValue) {
 
   try {
     if (maybeValue !== undefined) {
-      // Called with: updateDeployableFlag(client_name, stack, flagValue)
       const client_name = String(idOrClient).toLowerCase().trim();
       const stack = String(stackOrValue).toUpperCase().trim();
       const flagVal = parseInt(maybeValue, 10) === 1 ? 1 : 0;
 
       await conn.execute(
-        `UPDATE CLIENT_DEPLOYMENTS 
+        `UPDATE ${TABLE_NAME} 
          SET IS_DEPLOYABLE_TO_CLIENT = :flagVal, UPDATED_AT = :now
          WHERE LOWER(CLIENT_NAME) = LOWER(:client_name) AND STACK = :stack`,
         { flagVal, now, client_name, stack }
@@ -217,18 +190,17 @@ async function updateDeployableFlag(idOrClient, stackOrValue, maybeValue) {
            LAST_DEPLOYED_AT AS "last_deployed_at", RUN_ID AS "run_id", 
            IS_DEPLOYABLE_TO_CLIENT AS "is_deployable_to_client", 
            SYNCED_AT AS "synced_at", UPDATED_AT AS "updated_at"
-         FROM CLIENT_DEPLOYMENTS 
+         FROM ${TABLE_NAME} 
          WHERE LOWER(CLIENT_NAME) = LOWER(:client_name) AND STACK = :stack`,
         { client_name, stack }
       );
       return res.rows[0];
     } else {
-      // Called with: updateDeployableFlag(id, flagValue)
       const id = parseInt(idOrClient, 10);
       const flagVal = parseInt(stackOrValue, 10) === 1 ? 1 : 0;
 
       await conn.execute(
-        `UPDATE CLIENT_DEPLOYMENTS 
+        `UPDATE ${TABLE_NAME} 
          SET IS_DEPLOYABLE_TO_CLIENT = :flagVal, UPDATED_AT = :now
          WHERE ID = :id`,
         { flagVal, now, id }
@@ -241,12 +213,18 @@ async function updateDeployableFlag(idOrClient, stackOrValue, maybeValue) {
            LAST_DEPLOYED_AT AS "last_deployed_at", RUN_ID AS "run_id", 
            IS_DEPLOYABLE_TO_CLIENT AS "is_deployable_to_client", 
            SYNCED_AT AS "synced_at", UPDATED_AT AS "updated_at"
-         FROM CLIENT_DEPLOYMENTS 
+         FROM ${TABLE_NAME} 
          WHERE ID = :id`,
         { id }
       );
       return res.rows[0];
     }
+  } catch (err) {
+    if (err.message && err.message.includes('ORA-00942')) {
+      console.warn(`[Oracle Notice] Table ${TABLE_NAME} does not exist yet. Please run the table creation DDL script.`);
+      return null;
+    }
+    throw err;
   } finally {
     await conn.close();
   }
@@ -271,5 +249,6 @@ module.exports = {
   upsertDeployment,
   updateDeployableFlag,
   closePool,
-  getConnectString
+  getConnectString,
+  TABLE_NAME
 };

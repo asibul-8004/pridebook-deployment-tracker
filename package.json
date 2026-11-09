@@ -1,6 +1,6 @@
 {
   "name": "pridebook-version-tracker",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Two-tab single page Version Tracker application for Pridebook ERP client boxes and stage history",
   "main": "server.js",
   "scripts": {

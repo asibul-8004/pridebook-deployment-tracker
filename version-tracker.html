@@ -1163,14 +1163,6 @@
           <input type="text" id="clientSearchInput" placeholder="Filter by client name, version, or user..." oninput="handleClientFilterChange()" />
         </div>
 
-        <!-- Stack Filter Buttons (F for Frontend, B for Backend) -->
-        <div class="filter-group">
-          <span style="font-size:0.75rem; color:var(--text-muted); font-weight:600; text-transform:uppercase;">Stack:</span>
-          <button class="filter-btn active" data-stack="all" onclick="setClientStackFilter('all')">All Stacks</button>
-          <button class="filter-btn" data-stack="F" onclick="setClientStackFilter('F')">Frontend (F)</button>
-          <button class="filter-btn" data-stack="B" onclick="setClientStackFilter('B')">Backend (B)</button>
-        </div>
-
         <!-- Deployable Filter Buttons (0 = Deployable, 1 = Has Issue) -->
         <div class="filter-group">
           <span style="font-size:0.75rem; color:var(--text-muted); font-weight:600; text-transform:uppercase;">Deployable:</span>
@@ -1217,18 +1209,16 @@
           <thead>
             <tr>
               <th>Client Box</th>
-              <th>Stack</th>
-              <th>Deployable to Client</th>
-              <th>Current Version</th>
+              <th>Frontend Version</th>
+              <th>Backend Version</th>
               <th>Status</th>
-              <th>Deployed By</th>
-              <th>Last Deployed At</th>
-              <th>GitHub Run ID</th>
-              <th>Actions</th>
+              <th>Frontend Deploy At</th>
+              <th>Backend Deploy At</th>
+              <th>Deployable to Client</th>
             </tr>
           </thead>
           <tbody id="clientTableBody">
-            <!-- Rendered dynamically from live deployments.json -->
+            <!-- Rendered dynamically from live DB & GitHub -->
           </tbody>
         </table>
       </div>
@@ -1298,7 +1288,9 @@
             <tr>
               <th style="width: 50px;">#</th>
               <th>Client Box</th>
-              <th>Version Tag</th>
+              <th>Trigger</th>
+              <th>Frontend Version</th>
+              <th>Backend Version</th>
               <th>Status</th>
               <th>Deployed At</th>
               <th>Deployed By</th>
@@ -1338,7 +1330,6 @@
       theme: localStorage.getItem('pride_theme') || 'dark',
       clientView: 'table', // By default in list/table mode
       clientStatusFilter: 'all',
-      clientStackFilter: 'all',      // 'all', 'F', 'B'
       clientDeployableFilter: 'all', // 'all', '0', '1'
       clientSearchTerm: '',
       historySelectedClient: 'all',
@@ -1348,6 +1339,7 @@
 
     let rawData = {};
     let dbDeployments = [];
+    let mergedHistory = [];
     let normalizedClients = [];
     let autoRefreshTimer = null;
 
@@ -1391,11 +1383,11 @@
       }
     }
 
-    // Convert raw JSON object to DB deployment records
+    // Convert raw JSON object to DB deployment records (Merged F + B, no STACK)
     function buildDbDeploymentsFromRaw(json) {
       const records = [];
       let nextId = 1;
-      const standardClients = ['stage', 'shinshin', 'karupannya', 'ananta-uat', 'ananta-live'];
+      const standardClients = ['stage', 'shinshin', 'bengal', 'karupannya', 'ananta-uat', 'ananta-live'];
       const clientMap = new Map();
 
       if (json && typeof json === 'object') {
@@ -1408,30 +1400,19 @@
 
       for (const client of standardClients) {
         const curr = clientMap.get(client) || {};
-        // Frontend Stack (F)
         records.push({
-          id: nextId++,
+          id: nextId,
+          deployment_tracker_no: nextId++,
           client_name: client,
-          stack: 'F',
-          version: curr.version || 'unknown',
+          frontend_version: curr.version || 'unknown',
+          backend_version: client === 'stage' ? 'v2.10.1' : (client === 'bengal' ? 'v2.10.0' : (client === 'shinshin' ? 'v2.9.0' : 'unknown')),
           status: curr.status || 'pending_first_deploy',
           deployed_by: curr.deployed_by || 'system',
-          last_deployed_at: curr.last_deployed_at || null,
-          run_id: curr.run_id ? String(curr.run_id) : null,
+          frontend_deployed_at: curr.last_deployed_at || null,
+          backend_deployed_at: null,
+          frontend_run_id: curr.run_id ? String(curr.run_id) : null,
+          backend_run_id: null,
           is_deployable_to_client: curr.is_deployable_to_client !== undefined ? curr.is_deployable_to_client : 0
-        });
-
-        // Backend Stack (B)
-        records.push({
-          id: nextId++,
-          client_name: client,
-          stack: 'B',
-          version: client === 'stage' ? 'v2.10.0' : (client === 'shinshin' ? 'v2.9.0' : (client === 'karupannya' ? 'v2.7.0' : 'unknown')),
-          status: (client === 'stage' || client === 'shinshin' || client === 'karupannya') ? 'success' : 'pending_first_deploy',
-          deployed_by: (client === 'stage' || client === 'shinshin') ? 'asibul-8004' : (client === 'karupannya' ? 'akib1689' : 'system'),
-          last_deployed_at: client === 'stage' ? '2026-11-09T05:43:30Z' : null,
-          run_id: client === 'stage' ? '42568929988' : null,
-          is_deployable_to_client: 0
         });
       }
 
@@ -1498,7 +1479,7 @@
       try {
         let loadedFromDb = false;
 
-        // 1. Fetch from SQLite DB endpoint (which triggers sync from GitHub when requested)
+        // 1. Fetch from DB endpoint (which triggers sync from GitHub when requested)
         if (window.location.protocol.startsWith('http')) {
           try {
             const dbUrl = `/api/db/deployments?sync=${isManual ? 'true' : 'false'}&t=${Date.now()}`;
@@ -1517,6 +1498,25 @@
             }
           } catch (e) {
             console.warn('DB endpoint not available:', e.message);
+          }
+
+          // 1b. Fetch merged history
+          try {
+            const histUrl = `/api/deployments/history?t=${Date.now()}`;
+            const histRes = await fetch(histUrl, {
+              headers: {
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache'
+              }
+            });
+            if (histRes.ok) {
+              const histJson = await histRes.json();
+              if (histJson.success && Array.isArray(histJson.data)) {
+                mergedHistory = histJson.data;
+              }
+            }
+          } catch (e) {
+            console.warn('History endpoint not available:', e.message);
           }
         }
 
@@ -1580,9 +1580,9 @@
         if (r.is_deployable_to_client === 0) deployableCount++;
         else if (r.is_deployable_to_client === 1) issueCount++;
 
-        if (r.client_name.toLowerCase() === 'stage') {
-          if (r.stack === 'F' && r.version && r.version !== 'unknown') stageVerF = r.version;
-          if (r.stack === 'B' && r.version && r.version !== 'unknown') stageVerB = r.version;
+        if (r.client_name && r.client_name.toLowerCase() === 'stage') {
+          if (r.frontend_version && r.frontend_version !== 'unknown') stageVerF = r.frontend_version;
+          if (r.backend_version && r.backend_version !== 'unknown') stageVerB = r.backend_version;
         }
       });
 
@@ -1605,8 +1605,8 @@
     }
 
     // Toggle deployable flag (0 = Deployable, 1 = Has Issue) and persist to DB
-    async function handleDeployableToggle(id, client, stack, targetFlag) {
-      const rec = dbDeployments.find(item => (id && item.id === id) || (item.client_name.toLowerCase() === client.toLowerCase() && item.stack === stack));
+    async function handleDeployableToggle(id, client, targetFlag) {
+      const rec = dbDeployments.find(item => (id && item.id === id) || ((item.client_name || '').toLowerCase() === client.toLowerCase()));
       if (rec) {
         rec.is_deployable_to_client = targetFlag;
         renderMetrics();
@@ -1618,9 +1618,8 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            id: id || undefined,
+            id: typeof id === 'number' ? id : undefined,
             client_name: client,
-            stack: stack,
             is_deployable_to_client: targetFlag
           })
         });
@@ -1628,7 +1627,7 @@
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         const flagName = targetFlag === 0 ? 'Deployable (0)' : 'Has Issue / Not Deployable (1)';
-        showToast(`✅ ${client.toUpperCase()} [${stack}]: Updated to ${flagName}`);
+        showToast(`✅ ${client.toUpperCase()}: Updated to ${flagName}`);
       } catch (err) {
         console.error('Failed to update deployable flag in DB:', err);
         showToast(`Could not persist to DB: ${err.message}`, 'error');
@@ -1641,18 +1640,10 @@
     }
 
     // Filter Handlers
-    function setClientStackFilter(stack) {
-      config.clientStackFilter = stack;
-      document.querySelectorAll('[data-stack]').forEach(btn => {
-        btn.classList.toggle('active', btn.getAttribute('data-stack') === stack);
-      });
-      renderTab1Clients();
-    }
-
     function setDeployableFilter(val) {
       config.clientDeployableFilter = val;
       document.querySelectorAll('[data-deployable]').forEach(btn => {
-        btn.classList.toggle('active', btn.getAttribute('data-deployable') === val);
+        btn.classList.toggle('active', btn.getAttribute('data-deployable') === String(val));
       });
       renderTab1Clients();
     }
@@ -1676,11 +1667,6 @@
       const tableBody = document.getElementById('clientTableBody');
 
       let filtered = dbDeployments.filter(r => {
-        // Stack Filter (F or B)
-        if (config.clientStackFilter !== 'all' && r.stack !== config.clientStackFilter) {
-          return false;
-        }
-
         // Deployable Filter (0 or 1)
         if (config.clientDeployableFilter !== 'all') {
           const targetVal = parseInt(config.clientDeployableFilter, 10);
@@ -1698,18 +1684,18 @@
         // Search query
         if (config.clientSearchTerm) {
           const q = config.clientSearchTerm.toLowerCase();
-          const matchName = r.client_name.toLowerCase().includes(q);
-          const matchVer = (r.version || '').toLowerCase().includes(q);
+          const matchName = (r.client_name || '').toLowerCase().includes(q);
+          const matchFVer = (r.frontend_version || '').toLowerCase().includes(q);
+          const matchBVer = (r.backend_version || '').toLowerCase().includes(q);
           const matchUser = (r.deployed_by || '').toLowerCase().includes(q);
-          const matchRun = (r.run_id || '').toLowerCase().includes(q);
-          if (!matchName && !matchVer && !matchUser && !matchRun) return false;
+          if (!matchName && !matchFVer && !matchBVer && !matchUser) return false;
         }
 
         return true;
       });
 
       if (filtered.length === 0) {
-        tableBody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding: 32px; color:var(--text-muted)">No matching client deployments found</td></tr>`;
+        tableBody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding: 32px; color:var(--text-muted)">No matching client deployments found</td></tr>`;
         grid.innerHTML = `<div style="grid-column: 1/-1; text-align:center; padding: 32px; color:var(--text-muted)">No matching client deployments found</div>`;
         return;
       }
@@ -1776,31 +1762,63 @@
 
     // Default View: Table / List Row
     function renderClientTableRow(r) {
-      const isUnknown = !r.version || r.version === 'unknown';
+      const isFUnknown = !r.frontend_version || r.frontend_version === 'unknown';
+      const isBUnknown = !r.backend_version || r.backend_version === 'unknown';
       const initials = getInitials(r.client_name);
-      const isStage = r.client_name.toLowerCase() === 'stage';
+      const isStage = (r.client_name || '').toLowerCase() === 'stage';
       const isDeployable = r.is_deployable_to_client === 0;
-
-      const runDisplay = r.run_id 
-        ? `<span style="font-family: monospace; font-size: 0.85rem; color: var(--text-secondary);">#${escapeHtml(r.run_id)}</span>`
-        : '<span style="color:var(--text-muted)">-</span>';
 
       return `
         <tr>
+          <!-- 1. Client Box -->
           <td>
             <div class="client-cell">
               <div class="client-avatar-sm">${initials}</div>
               <div>
-                <strong>${escapeHtml(r.client_name.toUpperCase())}</strong>
+                <strong>${escapeHtml((r.client_name || '').toUpperCase())}</strong>
                 ${isStage ? '<span class="badge-sub" style="margin-left:6px;">Stage</span>' : '<span style="font-size:0.75rem; color:var(--text-muted); margin-left:6px;">tenant</span>'}
               </div>
             </div>
           </td>
+
+          <!-- 2. Frontend Version -->
           <td>
-            <span class="stack-badge ${r.stack === 'F' ? 'stack-f' : 'stack-b'}" title="${r.stack === 'F' ? 'Frontend Stack' : 'Backend Stack'}">
-              ${r.stack === 'F' ? 'F &bull; Frontend' : 'B &bull; Backend'}
-            </span>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <span class="stack-badge stack-f" style="padding: 1px 6px; font-size: 0.7rem;">F</span>
+              <span class="table-ver">${escapeHtml(r.frontend_version || 'unknown')}</span>
+              ${!isFUnknown ? `<button class="btn-copy" style="padding:2px 6px;" onclick="copyText('${escapeHtml(r.frontend_version)}')">copy</button>` : ''}
+            </div>
           </td>
+
+          <!-- 3. Backend Version -->
+          <td>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <span class="stack-badge stack-b" style="padding: 1px 6px; font-size: 0.7rem;">B</span>
+              <span class="table-ver">${escapeHtml(r.backend_version || 'unknown')}</span>
+              ${!isBUnknown ? `<button class="btn-copy" style="padding:2px 6px;" onclick="copyText('${escapeHtml(r.backend_version)}')">copy</button>` : ''}
+            </div>
+          </td>
+
+          <!-- 4. Status -->
+          <td>${getStatusBadge(r.status)}</td>
+
+          <!-- 5. Frontend Deploy At -->
+          <td>
+            ${r.frontend_deployed_at ? `
+              <div>${formatDateTime(r.frontend_deployed_at)}</div>
+              <small style="color:var(--text-muted); font-size:0.75rem;">${formatRelativeTime(r.frontend_deployed_at)}</small>
+            ` : '<span style="color:var(--text-muted)">-</span>'}
+          </td>
+
+          <!-- 6. Backend Deploy At -->
+          <td>
+            ${r.backend_deployed_at ? `
+              <div>${formatDateTime(r.backend_deployed_at)}</div>
+              <small style="color:var(--text-muted); font-size:0.75rem;">${formatRelativeTime(r.backend_deployed_at)}</small>
+            ` : '<span style="color:var(--text-muted)">-</span>'}
+          </td>
+
+          <!-- 7. Deployable to Client -->
           <td>
             <div class="deployable-toggle-cell">
               <input 
@@ -1808,34 +1826,16 @@
                 class="deployable-checkbox" 
                 ${!isDeployable ? 'checked' : ''} 
                 title="Toggle deployable status (0 = Deployable, 1 = Has Issue)"
-                onchange="handleDeployableToggle(${r.id}, '${escapeHtml(r.client_name)}', '${r.stack}', this.checked ? 1 : 0)" 
+                onchange="handleDeployableToggle(${r.id || `'${escapeHtml(r.client_name)}'`}, '${escapeHtml(r.client_name)}', this.checked ? 1 : 0)" 
               />
               <span 
                 class="deployable-pill ${isDeployable ? 'ok' : 'issue'}" 
-                onclick="handleDeployableToggle(${r.id}, '${escapeHtml(r.client_name)}', '${r.stack}', ${isDeployable ? 1 : 0})"
+                onclick="handleDeployableToggle(${r.id || `'${escapeHtml(r.client_name)}'`}, '${escapeHtml(r.client_name)}', ${isDeployable ? 1 : 0})"
                 title="Click to toggle (0: Deployable, 1: Has Issue)"
               >
                 ${isDeployable ? '✓ Deployable (0)' : '⚠ Issue (1)'}
               </span>
             </div>
-          </td>
-          <td>
-            <div style="display:flex; align-items:center; gap:6px;">
-              <span class="table-ver">${escapeHtml(r.version || 'unknown')}</span>
-              ${!isUnknown ? `<button class="btn-copy" style="padding:2px 6px;" onclick="copyText('${escapeHtml(r.version)}')">copy</button>` : ''}
-            </div>
-          </td>
-          <td>${getStatusBadge(r.status)}</td>
-          <td><strong>${escapeHtml(r.deployed_by || '-')}</strong></td>
-          <td>
-            ${formatDateTime(r.last_deployed_at)}
-            <small style="color:var(--text-muted); font-size:0.75rem; margin-left:4px;">${formatRelativeTime(r.last_deployed_at)}</small>
-          </td>
-          <td>${runDisplay}</td>
-          <td>
-            <button class="btn btn-primary" style="padding: 4px 10px; font-size: 0.78rem;" onclick="viewClientHistory('${escapeHtml(r.client_name)}')">
-              History
-            </button>
           </td>
         </tr>
       `;
@@ -1844,13 +1844,8 @@
     // Grid Card Row
     function renderClientCard(r) {
       const initials = getInitials(r.client_name);
-      const isUnknown = !r.version || r.version === 'unknown';
-      const isStage = r.client_name.toLowerCase() === 'stage';
+      const isStage = (r.client_name || '').toLowerCase() === 'stage';
       const isDeployable = r.is_deployable_to_client === 0;
-
-      const runDisplay = r.run_id 
-        ? `<span style="font-family: monospace; font-size: 0.85rem; color: var(--text-secondary);">#${escapeHtml(r.run_id)}</span>`
-        : '<span style="color:var(--text-muted)">-</span>';
 
       return `
         <div class="client-card ${isStage ? 'is-stage' : 'is-client'}">
@@ -1859,11 +1854,8 @@
               <div class="client-id-area">
                 <div class="client-avatar">${initials}</div>
                 <div class="client-name-wrap">
-                  <div style="display:flex; align-items:center; gap:8px;">
-                    <h3>${escapeHtml(r.client_name.toUpperCase())}</h3>
-                    <span class="stack-badge ${r.stack === 'F' ? 'stack-f' : 'stack-b'}">${r.stack === 'F' ? 'F' : 'B'}</span>
-                  </div>
-                  <span class="client-type-tag">${isStage ? 'Staging Environment' : 'Production Tenant'} &bull; ${r.stack === 'F' ? 'Frontend' : 'Backend'}</span>
+                  <h3>${escapeHtml((r.client_name || '').toUpperCase())}</h3>
+                  <span class="client-type-tag">${isStage ? 'Staging Environment' : 'Production Tenant Box'}</span>
                 </div>
               </div>
               <div>${getStatusBadge(r.status)}</div>
@@ -1877,45 +1869,59 @@
                   type="checkbox" 
                   class="deployable-checkbox" 
                   ${!isDeployable ? 'checked' : ''} 
-                  onchange="handleDeployableToggle(${r.id}, '${escapeHtml(r.client_name)}', '${r.stack}', this.checked ? 1 : 0)" 
+                  onchange="handleDeployableToggle(${r.id || `'${escapeHtml(r.client_name)}'`}, '${escapeHtml(r.client_name)}', this.checked ? 1 : 0)" 
                 />
                 <span 
                   class="deployable-pill ${isDeployable ? 'ok' : 'issue'}" 
-                  onclick="handleDeployableToggle(${r.id}, '${escapeHtml(r.client_name)}', '${r.stack}', ${isDeployable ? 1 : 0})"
+                  onclick="handleDeployableToggle(${r.id || `'${escapeHtml(r.client_name)}'`}, '${escapeHtml(r.client_name)}', ${isDeployable ? 1 : 0})"
                 >
                   ${isDeployable ? '✓ Ready (0)' : '⚠ Issue (1)'}
                 </span>
               </div>
             </div>
 
-            <div class="version-block">
-              <div class="version-display">
-                <span class="lbl">Current Version</span>
-                <span class="val ${isUnknown ? 'unknown' : ''}">${escapeHtml(r.version || 'unknown')}</span>
+            <!-- Frontend & Backend Versions Side-by-Side -->
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:14px;">
+              <div class="version-block" style="padding:10px;">
+                <div class="version-display">
+                  <span class="lbl" style="display:flex; align-items:center; gap:4px;">
+                    <span class="stack-badge stack-f" style="padding:1px 5px; font-size:0.65rem;">F</span> Frontend
+                  </span>
+                  <span class="val ${!r.frontend_version || r.frontend_version === 'unknown' ? 'unknown' : ''}" style="font-size:1rem;">
+                    ${escapeHtml(r.frontend_version || 'unknown')}
+                  </span>
+                </div>
               </div>
-              ${!isUnknown ? `
-                <button class="btn-copy" onclick="copyText('${escapeHtml(r.version)}')">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                  Copy
-                </button>
-              ` : ''}
+              <div class="version-block" style="padding:10px;">
+                <div class="version-display">
+                  <span class="lbl" style="display:flex; align-items:center; gap:4px;">
+                    <span class="stack-badge stack-b" style="padding:1px 5px; font-size:0.65rem;">B</span> Backend
+                  </span>
+                  <span class="val ${!r.backend_version || r.backend_version === 'unknown' ? 'unknown' : ''}" style="font-size:1rem;">
+                    ${escapeHtml(r.backend_version || 'unknown')}
+                  </span>
+                </div>
+              </div>
             </div>
 
             <div class="meta-list">
               <div class="meta-item">
-                <span class="meta-label">Deployed By</span>
-                <span class="meta-value">${escapeHtml(r.deployed_by || '-')}</span>
-              </div>
-              <div class="meta-item">
-                <span class="meta-label">Deployed At</span>
+                <span class="meta-label">Frontend Deployed</span>
                 <span class="meta-value">
-                  ${formatDateTime(r.last_deployed_at)} 
-                  <small style="color:var(--text-muted); font-size:0.75rem;">${formatRelativeTime(r.last_deployed_at)}</small>
+                  ${formatDateTime(r.frontend_deployed_at)} 
+                  <small style="color:var(--text-muted); font-size:0.75rem;">${formatRelativeTime(r.frontend_deployed_at)}</small>
                 </span>
               </div>
               <div class="meta-item">
-                <span class="meta-label">GitHub Run ID</span>
-                <span class="meta-value">${runDisplay}</span>
+                <span class="meta-label">Backend Deployed</span>
+                <span class="meta-value">
+                  ${formatDateTime(r.backend_deployed_at)} 
+                  <small style="color:var(--text-muted); font-size:0.75rem;">${formatRelativeTime(r.backend_deployed_at)}</small>
+                </span>
+              </div>
+              <div class="meta-item">
+                <span class="meta-label">Deployed By</span>
+                <span class="meta-value">${escapeHtml(r.deployed_by || '-')}</span>
               </div>
             </div>
           </div>
@@ -1979,32 +1985,34 @@
       const container = document.getElementById('historyClientFilterGroup');
       if (!container) return;
 
-      let totalAll = 0;
+      const entries = getAllHistoryEntries();
+      const totalAll = entries.length;
       const clientStats = {};
 
-      normalizedClients.forEach(c => {
-        let count = 0;
-        if (c.current && c.current.version && c.current.version !== 'unknown') count++;
-        if (Array.isArray(c.history)) count += c.history.length;
-        clientStats[c.id.toLowerCase()] = count;
-        totalAll += count;
+      entries.forEach(e => {
+        const c = (e.client_name || '').toLowerCase();
+        clientStats[c] = (clientStats[c] || 0) + 1;
       });
 
-      let html = `
-        <button class="filter-btn ${config.historySelectedClient === 'all' ? 'active' : ''}" 
-                onclick="setHistoryClientFilter('all')">
-          All Clients (${totalAll})
-        </button>
-      `;
+      const uniqueClients = ['all'];
+      const standardClients = ['stage', 'shinshin', 'bengal', 'karupannya', 'ananta-uat', 'ananta-live'];
+      standardClients.forEach(c => {
+        if (!uniqueClients.includes(c)) uniqueClients.push(c);
+      });
+      Object.keys(clientStats).forEach(c => {
+        if (!uniqueClients.includes(c)) uniqueClients.push(c);
+      });
 
-      normalizedClients.forEach(c => {
-        const idLower = c.id.toLowerCase();
-        const count = clientStats[idLower] || 0;
-        const isActive = config.historySelectedClient === idLower;
+      let html = '';
+      uniqueClients.forEach(c => {
+        const isAll = c === 'all';
+        const count = isAll ? totalAll : (clientStats[c] || 0);
+        const isActive = config.historySelectedClient === c;
+        const label = isAll ? 'All Clients' : c.toUpperCase();
         html += `
           <button class="filter-btn ${isActive ? 'active' : ''}" 
-                  onclick="setHistoryClientFilter('${escapeHtml(c.id)}')">
-            ${escapeHtml(c.name)} (${count})
+                  onclick="setHistoryClientFilter('${escapeHtml(c)}')">
+            ${escapeHtml(label)} (${count})
           </button>
         `;
       });
@@ -2013,57 +2021,45 @@
     }
 
     function getAllHistoryEntries() {
-      const entries = [];
+      if (mergedHistory && mergedHistory.length > 0) {
+        if (config.historySelectedClient !== 'all') {
+          return mergedHistory.filter(h => (h.client_name || '').toLowerCase() === config.historySelectedClient.toLowerCase());
+        }
+        return mergedHistory;
+      }
 
+      // Fallback if mergedHistory not loaded yet
+      const entries = [];
       normalizedClients.forEach(c => {
         const idLower = c.id.toLowerCase();
-        if (config.historySelectedClient !== 'all' && idLower !== config.historySelectedClient) {
-          return;
-        }
-
-        // Current deployed version (if valid)
+        if (config.historySelectedClient !== 'all' && idLower !== config.historySelectedClient) return;
         if (c.current && c.current.version && c.current.version !== 'unknown') {
           entries.push({
-            clientId: c.id,
-            clientName: c.name,
-            isStage: c.isStage,
-            version: c.current.version,
+            client_name: c.id,
+            event_stack: 'F',
+            frontend_version: c.current.version,
+            backend_version: 'v2.10.1',
             status: c.current.status,
-            last_deployed_at: c.current.last_deployed_at,
+            event_time: c.current.last_deployed_at,
             deployed_by: c.current.deployed_by,
-            run_id: c.current.run_id,
-            isCurrent: true
+            run_id: c.current.run_id
           });
         }
-
-        // Historical deployments
         if (Array.isArray(c.history)) {
           c.history.forEach(h => {
-            const isDup = c.current && c.current.version === h.version && (c.current.run_id ? c.current.run_id === h.run_id : true);
-            if (!isDup) {
-              entries.push({
-                clientId: c.id,
-                clientName: c.name,
-                isStage: c.isStage,
-                version: h.version,
-                status: h.status,
-                last_deployed_at: h.last_deployed_at,
-                deployed_by: h.deployed_by,
-                run_id: h.run_id,
-                isCurrent: false
-              });
-            }
+            entries.push({
+              client_name: c.id,
+              event_stack: 'F',
+              frontend_version: h.version,
+              backend_version: 'v2.10.0',
+              status: h.status,
+              event_time: h.last_deployed_at,
+              deployed_by: h.deployed_by,
+              run_id: h.run_id
+            });
           });
         }
       });
-
-      // Sort by deployment timestamp descending (newest first)
-      entries.sort((a, b) => {
-        const timeA = a.last_deployed_at ? new Date(a.last_deployed_at).getTime() : 0;
-        const timeB = b.last_deployed_at ? new Date(b.last_deployed_at).getTime() : 0;
-        return timeB - timeA;
-      });
-
       return entries;
     }
 
@@ -2085,18 +2081,16 @@
       if (config.historySelectedClient === 'all') {
         heroTitle.innerText = 'All Clients Deployment History';
         heroActiveClient.innerText = 'ALL';
-        const activeStage = normalizedClients.find(c => c.isStage);
-        heroActiveVer.innerText = (activeStage && activeStage.current.version) ? activeStage.current.version : '--';
-        heroSubtext.innerText = `Unified timeline of release deployments across all ${normalizedClients.length} target client boxes`;
+        const activeStage = dbDeployments.find(c => (c.client_name || '').toLowerCase() === 'stage');
+        heroActiveVer.innerText = activeStage ? `F: ${activeStage.frontend_version} | B: ${activeStage.backend_version}` : '--';
+        heroSubtext.innerText = `Unified timeline of release deployments across all ${dbDeployments.length || 6} target client boxes`;
       } else {
-        const selected = normalizedClients.find(c => c.id.toLowerCase() === config.historySelectedClient);
-        const name = selected ? selected.name : config.historySelectedClient.toUpperCase();
-        heroTitle.innerText = `${name} Deployment History`;
-        heroActiveClient.innerText = name;
-        heroActiveVer.innerText = (selected && selected.current && selected.current.version) ? selected.current.version : '--';
-        heroSubtext.innerText = selected && selected.current && selected.current.last_deployed_at
-          ? `Current release deployed by ${selected.current.deployed_by || 'system'} at ${formatDateTime(selected.current.last_deployed_at)}`
-          : `Release history for target client box ${name}`;
+        const cName = config.historySelectedClient.toUpperCase();
+        const clientRec = dbDeployments.find(c => (c.client_name || '').toLowerCase() === config.historySelectedClient);
+        heroTitle.innerText = `${cName} Deployment History`;
+        heroActiveClient.innerText = cName;
+        heroActiveVer.innerText = clientRec ? `F: ${clientRec.frontend_version} | B: ${clientRec.backend_version}` : '--';
+        heroSubtext.innerText = `Full release progression and merged version timeline for ${cName}`;
       }
 
       heroHistoryCount.innerText = allEntries.length;
@@ -2107,8 +2101,9 @@
       if (config.historySearchTerm) {
         const q = config.historySearchTerm.toLowerCase();
         filtered = filtered.filter(item =>
-          (item.clientId || '').toLowerCase().includes(q) ||
-          (item.version || '').toLowerCase().includes(q) ||
+          (item.client_name || '').toLowerCase().includes(q) ||
+          (item.frontend_version || '').toLowerCase().includes(q) ||
+          (item.backend_version || '').toLowerCase().includes(q) ||
           (item.deployed_by || '').toLowerCase().includes(q) ||
           (item.run_id || '').toLowerCase().includes(q)
         );
@@ -2126,7 +2121,7 @@
             emptyText.innerText = `Target box ${heroActiveClient.innerText} has not deployed any historical releases yet.`;
           }
         } else {
-          historyTableBody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding: 32px; color:var(--text-muted)">No matching records found for "${escapeHtml(config.historySearchTerm)}"</td></tr>`;
+          historyTableBody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding: 32px; color:var(--text-muted)">No matching records found for "${escapeHtml(config.historySearchTerm)}"</td></tr>`;
         }
         return;
       }
@@ -2134,7 +2129,9 @@
       emptyState.style.display = 'none';
 
       historyTableBody.innerHTML = filtered.map((item, idx) => {
-        const initials = getInitials(item.clientId);
+        const initials = getInitials(item.client_name);
+        const isStage = (item.client_name || '').toLowerCase() === 'stage';
+        const isF = item.event_stack === 'F';
         const runDisplay = item.run_id 
           ? `<span style="font-family: monospace; font-size: 0.85rem; color: var(--text-secondary);">#${escapeHtml(item.run_id)}</span>`
           : '<span style="color:var(--text-muted)">-</span>';
@@ -2143,25 +2140,35 @@
           <tr>
             <td style="color:var(--text-muted); font-size: 0.8rem; font-family: monospace;">#${idx + 1}</td>
             <td>
-              <div class="client-cell" style="cursor: pointer;" onclick="setHistoryClientFilter('${escapeHtml(item.clientId)}')">
+              <div class="client-cell" style="cursor: pointer;" onclick="setHistoryClientFilter('${escapeHtml(item.client_name)}')">
                 <div class="client-avatar-sm">${initials}</div>
                 <div>
-                  <strong>${escapeHtml(item.clientId)}</strong>
-                  ${item.isStage ? '<span class="badge-sub" style="margin-left:6px;">Stage</span>' : '<span style="font-size:0.75rem; color:var(--text-muted); margin-left:6px;">tenant</span>'}
+                  <strong>${escapeHtml((item.client_name || '').toUpperCase())}</strong>
+                  ${isStage ? '<span class="badge-sub" style="margin-left:6px;">Stage</span>' : '<span style="font-size:0.75rem; color:var(--text-muted); margin-left:6px;">tenant</span>'}
                 </div>
               </div>
             </td>
             <td>
+              <span class="stack-badge ${isF ? 'stack-f' : 'stack-b'}" style="padding: 2px 8px; font-size: 0.75rem;">
+                ${isF ? 'F &bull; Frontend' : 'B &bull; Backend'}
+              </span>
+            </td>
+            <td>
               <div style="display:flex; align-items:center; gap:6px;">
-                <span class="table-ver" style="font-size: 0.95rem;">${escapeHtml(item.version)}</span>
-                ${item.isCurrent ? '<span class="status-badge success" style="padding: 2px 6px; font-size: 0.7rem;">Active</span>' : ''}
-                <button class="btn-copy" style="padding: 2px 6px;" onclick="copyText('${escapeHtml(item.version)}')">copy</button>
+                <span class="table-ver" style="font-size: 0.95rem;">${escapeHtml(item.frontend_version || 'unknown')}</span>
+                ${item.frontend_version && item.frontend_version !== 'unknown' ? `<button class="btn-copy" style="padding: 2px 6px;" onclick="copyText('${escapeHtml(item.frontend_version)}')">copy</button>` : ''}
+              </div>
+            </td>
+            <td>
+              <div style="display:flex; align-items:center; gap:6px;">
+                <span class="table-ver" style="font-size: 0.95rem;">${escapeHtml(item.backend_version || 'unknown')}</span>
+                ${item.backend_version && item.backend_version !== 'unknown' ? `<button class="btn-copy" style="padding: 2px 6px;" onclick="copyText('${escapeHtml(item.backend_version)}')">copy</button>` : ''}
               </div>
             </td>
             <td>${getStatusBadge(item.status)}</td>
             <td>
-              ${formatDateTime(item.last_deployed_at)}
-              <small style="color:var(--text-muted); display:block; font-size: 0.75rem;">${formatRelativeTime(item.last_deployed_at)}</small>
+              ${formatDateTime(item.event_time)}
+              <small style="color:var(--text-muted); display:block; font-size: 0.75rem;">${formatRelativeTime(item.event_time)}</small>
             </td>
             <td><strong>${escapeHtml(item.deployed_by || '-')}</strong></td>
             <td>${runDisplay}</td>

@@ -169,15 +169,14 @@ const server = http.createServer(async (req, res) => {
   // GET /api/db/deployments - Query database records (with optional sync & stack filters)
   if (pathname === '/api/db/deployments' && req.method === 'GET') {
     const shouldSync = parsedUrl.searchParams.get('sync') === 'true';
-    const stackFilter = parsedUrl.searchParams.get('stack'); // 'F' or 'B'
     const clientFilter = parsedUrl.searchParams.get('client');
 
-    let rows = await db.getAllDeployments({ stack: stackFilter, client_name: clientFilter });
+    let rows = await db.getAllDeployments({ client_name: clientFilter });
 
     if (shouldSync || rows.length === 0) {
       try {
         await db.syncDatabaseFromGitHub(GITHUB_TOKEN);
-        rows = await db.getAllDeployments({ stack: stackFilter, client_name: clientFilter });
+        rows = await db.getAllDeployments({ client_name: clientFilter });
       } catch (err) {
         console.warn('[DB Sync Warn]:', err.message);
       }
@@ -194,6 +193,22 @@ const server = http.createServer(async (req, res) => {
       deployable_count: rows.filter(r => r.is_deployable_to_client === 0).length,
       issue_count: rows.filter(r => r.is_deployable_to_client === 1).length,
       data: rows
+    }, null, 2));
+    return;
+  }
+
+  // GET /api/deployments/history or /api/db/history - Chronological merged history timeline
+  if ((pathname === '/api/deployments/history' || pathname === '/api/db/history') && req.method === 'GET') {
+    const clientFilter = parsedUrl.searchParams.get('client');
+    const history = db.getMergedHistory(clientFilter);
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-cache, no-store, must-revalidate'
+    });
+    res.end(JSON.stringify({
+      success: true,
+      count: history.length,
+      data: history
     }, null, 2));
     return;
   }
@@ -223,23 +238,19 @@ const server = http.createServer(async (req, res) => {
     req.on('end', async () => {
       try {
         const payload = JSON.parse(body || '{}');
-        const { id, client_name, client, stack, is_deployable_to_client, is_deployable } = payload;
-        const targetClient = client_name || client;
+        const { id, client_name, client, is_deployable_to_client, is_deployable } = payload;
+        const target = id || client_name || client;
         const rawFlag = is_deployable_to_client !== undefined ? is_deployable_to_client : is_deployable;
         const flagVal = parseInt(rawFlag, 10) === 1 ? 1 : 0;
 
-        let record = null;
-        if (id) {
-          record = await db.updateDeployableFlag(id, flagVal);
-        } else if (targetClient && stack) {
-          record = await db.updateDeployableFlag(targetClient, stack, flagVal);
-        } else {
+        if (!target) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'id or (client_name and stack) required' }));
+          res.end(JSON.stringify({ error: 'id or client_name required' }));
           return;
         }
 
-        console.log(`[DB Updated] ${record.client_name} [${record.stack}]: is_deployable_to_client = ${flagVal} (${flagVal === 0 ? 'Deployable' : 'Has Issue'})`);
+        const record = await db.updateDeployableFlag(target, flagVal);
+        console.log(`[DB Updated] ${record?.client_name || target}: is_deployable_to_client = ${flagVal} (${flagVal === 0 ? 'Deployable' : 'Has Issue'})`);
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({

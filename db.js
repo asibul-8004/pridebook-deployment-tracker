@@ -3,12 +3,13 @@
  * Location: /home/asibul/Pridebook/deployment-tracker/db.js
  * 
  * Supports:
- * - Oracle Database (Thin Mode - Zero External Client Binaries)
+ * - Oracle Database 19c (Thin Mode - Zero External Client Binaries)
  * - Native SQLite (fallback / local standalone)
  * 
- * Security:
- * - Oracle IP, port, service name, user, and password are read from .env.
- * - Zero credentials hardcoded or committed to git.
+ * Architecture:
+ * - Merged client table SA_DEPLOYMENT_TRACKER (Frontend & Backend combined, no STACK column).
+ * - Chronological merge tracking for Frontend & Backend deployments.
+ * - Security: Database credentials strictly from .env.
  */
 
 const fs = require('fs');
@@ -20,6 +21,7 @@ const DB_PATH = process.env.DB_PATH || path.join(rootDir, 'deployments.db');
 
 let sqliteInstance = null;
 let oracleDb = null;
+let mergedHistoryCache = [];
 
 function isOracleConfigured() {
   const dbType = (process.env.DB_TYPE || '').toLowerCase();
@@ -47,30 +49,30 @@ function getSqliteDb() {
 
 function initSqliteSchema(db) {
   db.exec(`
-    CREATE TABLE IF NOT EXISTS client_deployments (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      client_name TEXT NOT NULL,
-      stack TEXT NOT NULL CHECK(stack IN ('F', 'B')),
-      version TEXT DEFAULT 'unknown',
+    CREATE TABLE IF NOT EXISTS SA_DEPLOYMENT_TRACKER (
+      deployment_tracker_no INTEGER PRIMARY KEY AUTOINCREMENT,
+      client_name TEXT NOT NULL UNIQUE,
+      frontend_version TEXT DEFAULT 'unknown',
+      backend_version TEXT DEFAULT 'unknown',
       status TEXT DEFAULT 'pending_first_deploy',
       deployed_by TEXT DEFAULT 'system',
-      last_deployed_at TEXT,
-      run_id TEXT,
+      frontend_deployed_at TEXT,
+      backend_deployed_at TEXT,
+      frontend_run_id TEXT,
+      backend_run_id TEXT,
       is_deployable_to_client INTEGER NOT NULL DEFAULT 0 CHECK(is_deployable_to_client IN (0, 1)),
       issue_notes TEXT DEFAULT '',
       synced_at TEXT,
-      updated_at TEXT,
-      UNIQUE(client_name, stack)
+      updated_at TEXT
     );
 
-    CREATE INDEX IF NOT EXISTS idx_deployments_client ON client_deployments(client_name);
-    CREATE INDEX IF NOT EXISTS idx_deployments_stack ON client_deployments(stack);
-    CREATE INDEX IF NOT EXISTS idx_deployments_deployable ON client_deployments(is_deployable_to_client);
+    CREATE INDEX IF NOT EXISTS idx_sa_deploy_client ON SA_DEPLOYMENT_TRACKER(client_name);
+    CREATE INDEX IF NOT EXISTS idx_sa_deploy_flag ON SA_DEPLOYMENT_TRACKER(is_deployable_to_client);
   `);
 }
 
 /**
- * Get all deployments from active DB (Oracle or SQLite)
+ * Get all merged client deployments from active DB
  */
 async function getAllDeployments(filters = {}) {
   const oracle = getOracleModule();
@@ -84,13 +86,27 @@ async function getAllDeployments(filters = {}) {
 
   // SQLite fallback
   const db = getSqliteDb();
-  let sql = `SELECT * FROM client_deployments WHERE 1=1`;
+  let sql = `
+    SELECT 
+      deployment_tracker_no AS id,
+      deployment_tracker_no,
+      client_name,
+      frontend_version,
+      backend_version,
+      status,
+      deployed_by,
+      frontend_deployed_at,
+      backend_deployed_at,
+      frontend_run_id,
+      backend_run_id,
+      is_deployable_to_client,
+      issue_notes,
+      synced_at,
+      updated_at
+    FROM SA_DEPLOYMENT_TRACKER
+    WHERE 1=1
+  `;
   const params = [];
-
-  if (filters.stack && (filters.stack === 'F' || filters.stack === 'B')) {
-    sql += ` AND stack = ?`;
-    params.push(filters.stack);
-  }
 
   if (filters.client_name) {
     sql += ` AND LOWER(client_name) = LOWER(?)`;
@@ -104,8 +120,7 @@ async function getAllDeployments(filters = {}) {
 
   sql += ` ORDER BY 
     CASE WHEN LOWER(client_name) = 'stage' THEN 0 ELSE 1 END,
-    client_name ASC,
-    stack ASC`;
+    client_name ASC`;
 
   const stmt = db.prepare(sql);
   return stmt.all(...params);
@@ -114,11 +129,11 @@ async function getAllDeployments(filters = {}) {
 /**
  * Update the is_deployable_to_client flag (0 = deployable, 1 = has issue)
  */
-async function updateDeployableFlag(idOrClient, stackOrValue, maybeValue) {
+async function updateDeployableFlag(idOrClient, flagValue) {
   const oracle = getOracleModule();
   if (oracle) {
     try {
-      return await oracle.updateDeployableFlag(idOrClient, stackOrValue, maybeValue);
+      return await oracle.updateDeployableFlag(idOrClient, flagValue);
     } catch (err) {
       console.warn('[Oracle Update Warn]: Falling back to SQLite:', err.message);
     }
@@ -127,42 +142,36 @@ async function updateDeployableFlag(idOrClient, stackOrValue, maybeValue) {
   // SQLite fallback
   const db = getSqliteDb();
   const now = new Date().toISOString();
+  const flagVal = parseInt(flagValue, 10) === 1 ? 1 : 0;
+  const isNum = !isNaN(Number(idOrClient)) && String(idOrClient).trim() !== '';
 
-  if (maybeValue !== undefined) {
-    const client_name = String(idOrClient).toLowerCase().trim();
-    const stack = String(stackOrValue).toUpperCase().trim();
-    const flagValue = parseInt(maybeValue, 10) === 1 ? 1 : 0;
-
-    const stmt = db.prepare(`
-      UPDATE client_deployments 
-      SET is_deployable_to_client = ?, updated_at = ?
-      WHERE LOWER(client_name) = LOWER(?) AND stack = ?
-    `);
-    stmt.run(flagValue, now, client_name, stack);
-
-    const selectStmt = db.prepare(`
-      SELECT * FROM client_deployments 
-      WHERE LOWER(client_name) = LOWER(?) AND stack = ?
-    `);
-    return selectStmt.get(client_name, stack);
-  } else {
+  if (isNum) {
     const id = parseInt(idOrClient, 10);
-    const flagValue = parseInt(stackOrValue, 10) === 1 ? 1 : 0;
-
     const stmt = db.prepare(`
-      UPDATE client_deployments 
+      UPDATE SA_DEPLOYMENT_TRACKER 
       SET is_deployable_to_client = ?, updated_at = ?
-      WHERE id = ?
+      WHERE deployment_tracker_no = ?
     `);
-    stmt.run(flagValue, now, id);
+    stmt.run(flagVal, now, id);
 
-    const selectStmt = db.prepare(`SELECT * FROM client_deployments WHERE id = ?`);
+    const selectStmt = db.prepare(`SELECT * FROM SA_DEPLOYMENT_TRACKER WHERE deployment_tracker_no = ?`);
     return selectStmt.get(id);
+  } else {
+    const client_name = String(idOrClient).toLowerCase().trim();
+    const stmt = db.prepare(`
+      UPDATE SA_DEPLOYMENT_TRACKER 
+      SET is_deployable_to_client = ?, updated_at = ?
+      WHERE LOWER(client_name) = LOWER(?)
+    `);
+    stmt.run(flagVal, now, client_name);
+
+    const selectStmt = db.prepare(`SELECT * FROM SA_DEPLOYMENT_TRACKER WHERE LOWER(client_name) = LOWER(?)`);
+    return selectStmt.get(client_name);
   }
 }
 
 /**
- * Upsert deployment from GitHub sync
+ * Upsert deployment record into SQLite fallback
  */
 async function upsertDeployment(record) {
   const oracle = getOracleModule();
@@ -176,130 +185,51 @@ async function upsertDeployment(record) {
 
   // SQLite fallback
   const db = getSqliteDb();
-  const client_name = String(record.client_name).toLowerCase().trim();
-  const stack = String(record.stack).toUpperCase().trim();
   const now = new Date().toISOString();
+  const client_name = String(record.client_name).toLowerCase().trim();
 
   const stmt = db.prepare(`
-    INSERT INTO client_deployments (
-      client_name, stack, version, status, deployed_by, last_deployed_at, run_id, is_deployable_to_client, synced_at, updated_at
-    ) VALUES (
-      ?, ?, ?, ?, ?, ?, ?, 0, ?, ?
+    INSERT INTO SA_DEPLOYMENT_TRACKER (
+      client_name, frontend_version, backend_version, status, deployed_by,
+      frontend_deployed_at, backend_deployed_at, frontend_run_id, backend_run_id,
+      is_deployable_to_client, synced_at, updated_at
     )
-    ON CONFLICT(client_name, stack) DO UPDATE SET
-      version = excluded.version,
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+    ON CONFLICT(client_name) DO UPDATE SET
+      frontend_version = excluded.frontend_version,
+      backend_version = excluded.backend_version,
       status = excluded.status,
       deployed_by = excluded.deployed_by,
-      last_deployed_at = excluded.last_deployed_at,
-      run_id = excluded.run_id,
-      synced_at = excluded.synced_at
+      frontend_deployed_at = excluded.frontend_deployed_at,
+      backend_deployed_at = excluded.backend_deployed_at,
+      frontend_run_id = excluded.frontend_run_id,
+      backend_run_id = excluded.backend_run_id,
+      synced_at = excluded.synced_at,
+      updated_at = excluded.updated_at
   `);
 
   stmt.run(
     client_name,
-    stack,
-    record.version || 'unknown',
+    record.frontend_version || 'unknown',
+    record.backend_version || 'unknown',
     record.status || 'pending_first_deploy',
     record.deployed_by || 'system',
-    record.last_deployed_at || null,
-    record.run_id ? String(record.run_id) : null,
+    record.frontend_deployed_at || null,
+    record.backend_deployed_at || null,
+    record.frontend_run_id ? String(record.frontend_run_id) : null,
+    record.backend_run_id ? String(record.backend_run_id) : null,
     now,
     now
   );
 }
 
 /**
- * Fetch Frontend ('F') deployment data from GitHub
+ * Fetch raw deployment history from GitHub Frontend repository
  */
-async function fetchFrontendDeployments(token) {
+async function fetchFrontendRawData(token) {
   const repo = process.env.GITHUB_FRONTEND_REPO || process.env.GITHUB_REPO || 'pride-erp-local/pride-erp-frontend';
   const branch = process.env.GITHUB_BRANCH || 'main';
-  const records = [];
-
-  try {
-    const url = `https://api.github.com/repos/${repo}/contents/deployments.json?ref=${branch}`;
-    const headers = {
-      'User-Agent': 'Pridebook-DB-Sync',
-      'Accept': 'application/vnd.github.v3+json'
-    };
-    if (token) headers['Authorization'] = `token ${token.trim()}`;
-
-    const res = await fetch(url, { headers });
-    if (res.ok) {
-      const result = await res.json();
-      let jsonContent = {};
-      if (result.content && result.encoding === 'base64') {
-        jsonContent = JSON.parse(Buffer.from(result.content, 'base64').toString('utf8'));
-      } else if (typeof result === 'object') {
-        jsonContent = result;
-      }
-
-      for (const [key, val] of Object.entries(jsonContent)) {
-        if (!val) continue;
-        const current = val.current ? val.current : val;
-        records.push({
-          client_name: key,
-          stack: 'F',
-          version: current.version || 'unknown',
-          status: current.status || 'pending_first_deploy',
-          deployed_by: current.deployed_by || 'system',
-          last_deployed_at: current.last_deployed_at || null,
-          run_id: current.run_id ? String(current.run_id) : null
-        });
-      }
-    }
-  } catch (err) {
-    console.warn(`[Sync] Failed to fetch frontend deployments.json from GitHub:`, err.message);
-  }
-
-  // Fallback to local deployments.json
-  if (records.length === 0) {
-    const localJsonPath = path.join(rootDir, 'deployments.json');
-    if (fs.existsSync(localJsonPath)) {
-      try {
-        const localData = JSON.parse(fs.readFileSync(localJsonPath, 'utf8'));
-        for (const [key, val] of Object.entries(localData)) {
-          const current = val.current ? val.current : val;
-          records.push({
-            client_name: key,
-            stack: 'F',
-            version: current.version || 'unknown',
-            status: current.status || 'pending_first_deploy',
-            deployed_by: current.deployed_by || 'system',
-            last_deployed_at: current.last_deployed_at || null,
-            run_id: current.run_id ? String(current.run_id) : null
-          });
-        }
-      } catch (e) {}
-    }
-  }
-
-  const standardClients = ['stage', 'shinshin', 'karupannya', 'ananta-uat', 'ananta-live'];
-  for (const client of standardClients) {
-    if (!records.some(r => r.client_name === client)) {
-      records.push({
-        client_name: client,
-        stack: 'F',
-        version: 'unknown',
-        status: 'pending_first_deploy',
-        deployed_by: null,
-        last_deployed_at: null,
-        run_id: null
-      });
-    }
-  }
-
-  return records;
-}
-
-/**
- * Fetch Backend ('B') deployment data from GitHub
- */
-async function fetchBackendDeployments(token) {
-  const repo = process.env.GITHUB_BACKEND_REPO || 'pride-erp-local/pride-erp-backend';
-  const branch = process.env.GITHUB_BRANCH || 'main';
-  const standardClients = ['stage', 'shinshin', 'karupannya', 'ananta-uat', 'ananta-live'];
-  const clientLatestMap = new Map();
+  const eventsByClient = {};
 
   const headers = {
     'User-Agent': 'Pridebook-DB-Sync',
@@ -315,54 +245,114 @@ async function fetchBackendDeployments(token) {
       let jsonContent = {};
       if (result.content && result.encoding === 'base64') {
         jsonContent = JSON.parse(Buffer.from(result.content, 'base64').toString('utf8'));
+      } else if (typeof result === 'object') {
+        jsonContent = result;
       }
+
       for (const [key, val] of Object.entries(jsonContent)) {
+        if (!val) continue;
+        const client = key.toLowerCase().trim();
+        if (!eventsByClient[client]) eventsByClient[client] = [];
+
+        // Historical runs
+        if (val.history && Array.isArray(val.history)) {
+          for (const h of val.history) {
+            if (h.version) {
+              eventsByClient[client].push({
+                stack: 'F',
+                version: h.version,
+                timestamp: h.last_deployed_at || null,
+                deployed_by: h.deployed_by || 'system',
+                status: h.status || 'success',
+                run_id: h.run_id ? String(h.run_id) : null
+              });
+            }
+          }
+        }
+
+        // Current run
         const current = val.current ? val.current : val;
-        clientLatestMap.set(key.toLowerCase(), {
-          client_name: key.toLowerCase(),
-          stack: 'B',
+        if (current.version) {
+          eventsByClient[client].push({
+            stack: 'F',
+            version: current.version,
+            timestamp: current.last_deployed_at || null,
+            deployed_by: current.deployed_by || 'system',
+            status: current.status || 'success',
+            run_id: current.run_id ? String(current.run_id) : null
+          });
+        }
+      }
+    }
+  } catch (err) {
+    console.warn(`[Sync] Failed to fetch frontend deployments.json:`, err.message);
+  }
+
+  // Fallback to local deployments.json if needed
+  const localJsonPath = path.join(rootDir, 'deployments.json');
+  if (Object.keys(eventsByClient).length === 0 && fs.existsSync(localJsonPath)) {
+    try {
+      const localData = JSON.parse(fs.readFileSync(localJsonPath, 'utf8'));
+      for (const [key, val] of Object.entries(localData)) {
+        const client = key.toLowerCase().trim();
+        if (!eventsByClient[client]) eventsByClient[client] = [];
+        const current = val.current ? val.current : val;
+        eventsByClient[client].push({
+          stack: 'F',
           version: current.version || 'unknown',
-          status: current.status || 'pending_first_deploy',
+          timestamp: current.last_deployed_at || null,
           deployed_by: current.deployed_by || 'system',
-          last_deployed_at: current.last_deployed_at || null,
+          status: current.status || 'pending_first_deploy',
           run_id: current.run_id ? String(current.run_id) : null
         });
       }
-    }
-  } catch (e) {}
+    } catch (e) {}
+  }
+
+  return eventsByClient;
+}
+
+/**
+ * Fetch raw deployment history from GitHub Backend repository
+ */
+async function fetchBackendRawData(token) {
+  const repo = process.env.GITHUB_BACKEND_REPO || 'pride-erp-local/pride-erp-backend';
+  const eventsByClient = {};
+
+  const headers = {
+    'User-Agent': 'Pridebook-DB-Sync',
+    'Accept': 'application/vnd.github.v3+json'
+  };
+  if (token) headers['Authorization'] = `token ${token.trim()}`;
 
   if (token) {
     try {
-      const runsUrl = `https://api.github.com/repos/${repo}/actions/runs?event=workflow_dispatch&per_page=12`;
+      const runsUrl = `https://api.github.com/repos/${repo}/actions/runs?per_page=35`;
       const res = await fetch(runsUrl, { headers });
       if (res.ok) {
         const runsData = await res.json();
         const runs = runsData.workflow_runs || [];
 
+        // Check each release deploy workflow
         await Promise.all(runs.map(async (run) => {
+          if (!run.name || !run.name.includes('Release Deploy')) return;
           try {
             const jobsRes = await fetch(run.jobs_url, { headers });
             if (!jobsRes.ok) return;
             const jobsData = await jobsRes.json();
-            const jobs = jobsData.jobs || [];
-
-            for (const job of jobs) {
+            for (const job of jobsData.jobs || []) {
               const match = job.name.match(/(?:Deploy|Validate release)\s+(v[0-9.]+)\s+(?:to|for)\s+([a-zA-Z0-9_-]+)/i);
-              if (match) {
-                const tag = match[1];
+              if (match && job.name.startsWith('Deploy')) {
                 const client = match[2].toLowerCase().trim();
-
-                if (!clientLatestMap.has(client)) {
-                  clientLatestMap.set(client, {
-                    client_name: client,
-                    stack: 'B',
-                    version: tag,
-                    status: run.conclusion === 'success' ? 'success' : (run.conclusion || run.status || 'pending'),
-                    deployed_by: run.actor ? run.actor.login : 'system',
-                    last_deployed_at: run.created_at,
-                    run_id: String(run.id)
-                  });
-                }
+                if (!eventsByClient[client]) eventsByClient[client] = [];
+                eventsByClient[client].push({
+                  stack: 'B',
+                  version: match[1],
+                  timestamp: job.completed_at || run.created_at,
+                  deployed_by: run.actor?.login || 'system',
+                  status: job.conclusion === 'success' ? 'success' : (job.conclusion || 'pending'),
+                  run_id: String(run.id)
+                });
               }
             }
           } catch (e) {}
@@ -373,36 +363,108 @@ async function fetchBackendDeployments(token) {
     }
   }
 
-  for (const client of standardClients) {
-    if (!clientLatestMap.has(client)) {
-      clientLatestMap.set(client, {
-        client_name: client,
-        stack: 'B',
-        version: 'unknown',
-        status: 'pending_first_deploy',
-        deployed_by: null,
-        last_deployed_at: null,
-        run_id: null
-      });
-    }
-  }
-
-  return Array.from(clientLatestMap.values());
+  return eventsByClient;
 }
 
 /**
- * Synchronize DB table from GitHub repositories
+ * Synchronize DB table from GitHub repositories using chronological merge
  */
 async function syncDatabaseFromGitHub(token) {
-  const frontendRecords = await fetchFrontendDeployments(token);
-  const backendRecords = await fetchBackendDeployments(token);
-  const allRecords = [...frontendRecords, ...backendRecords];
+  const frontendEvents = await fetchFrontendRawData(token);
+  const backendEvents = await fetchBackendRawData(token);
 
-  for (const rec of allRecords) {
-    await upsertDeployment(rec);
+  const standardClients = ['stage', 'shinshin', 'bengal', 'karupannya', 'ananta-uat', 'ananta-live'];
+  const allClientNames = Array.from(new Set([
+    ...standardClients,
+    ...Object.keys(frontendEvents),
+    ...Object.keys(backendEvents)
+  ]));
+
+  const latestMergedClients = [];
+  const fullMergedTimeline = [];
+
+  for (const client of allClientNames) {
+    const rawF = (frontendEvents[client] || []).filter(e => e.timestamp);
+    const rawB = (backendEvents[client] || []).filter(e => e.timestamp);
+
+    // Sort all events chronologically (oldest to newest)
+    const combinedEvents = [...rawF, ...rawB].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+    let curF = { version: 'unknown', deployed_at: null, deployed_by: null, run_id: null, status: 'pending_first_deploy' };
+    let curB = { version: 'unknown', deployed_at: null, deployed_by: null, run_id: null, status: 'pending_first_deploy' };
+
+    for (const ev of combinedEvents) {
+      if (ev.stack === 'F') {
+        curF = {
+          version: ev.version,
+          deployed_at: ev.timestamp,
+          deployed_by: ev.deployed_by,
+          run_id: ev.run_id,
+          status: ev.status
+        };
+      } else if (ev.stack === 'B') {
+        curB = {
+          version: ev.version,
+          deployed_at: ev.timestamp,
+          deployed_by: ev.deployed_by,
+          run_id: ev.run_id,
+          status: ev.status
+        };
+      }
+
+      // Snapshot at this point in time
+      fullMergedTimeline.push({
+        client_name: client,
+        event_stack: ev.stack, // which component triggered this event ('F' or 'B')
+        frontend_version: curF.version,
+        backend_version: curB.version,
+        frontend_deployed_at: curF.deployed_at,
+        backend_deployed_at: curB.deployed_at,
+        deployed_by: ev.deployed_by || 'system',
+        status: ev.status || 'success',
+        run_id: ev.run_id,
+        event_time: ev.timestamp
+      });
+    }
+
+    // Determine latest combined status
+    const overallStatus = (curF.status === 'success' || curB.status === 'success') 
+      ? 'success' 
+      : (curF.status || curB.status || 'pending_first_deploy');
+
+    const mergedRecord = {
+      client_name: client,
+      frontend_version: curF.version,
+      backend_version: curB.version,
+      status: overallStatus,
+      deployed_by: curF.deployed_by || curB.deployed_by || 'system',
+      frontend_deployed_at: curF.deployed_at,
+      backend_deployed_at: curB.deployed_at,
+      frontend_run_id: curF.run_id,
+      backend_run_id: curB.run_id,
+      is_deployable_to_client: 0
+    };
+
+    latestMergedClients.push(mergedRecord);
+
+    // Upsert into active DB table SA_DEPLOYMENT_TRACKER
+    await upsertDeployment(mergedRecord);
   }
 
+  // Update memory cache for history queries (newest first)
+  mergedHistoryCache = fullMergedTimeline.sort((a, b) => new Date(b.event_time) - new Date(a.event_time));
+
   return await getAllDeployments();
+}
+
+/**
+ * Get merged history timeline (for Tab 2)
+ */
+function getMergedHistory(clientFilter) {
+  if (clientFilter && clientFilter !== 'all') {
+    return mergedHistoryCache.filter(h => h.client_name.toLowerCase() === clientFilter.toLowerCase());
+  }
+  return mergedHistoryCache;
 }
 
 function getActiveDbType() {
@@ -414,6 +476,7 @@ module.exports = {
   updateDeployableFlag,
   upsertDeployment,
   syncDatabaseFromGitHub,
+  getMergedHistory,
   getActiveDbType,
   DB_PATH
 };

@@ -3,17 +3,12 @@
  * Pridebook Deployment Database Sync Script
  * 
  * Usage:
- *   node scripts/sync-deployments-db.js
- *   node scripts/sync-deployments-db.js --list
- *   node scripts/sync-deployments-db.js --toggle <client> <stack> <0|1>
+ *   node scripts/sync-deployments-db.js                  # Sync from GitHub & display table
+ *   node scripts/sync-deployments-db.js --list           # Display current DB records without sync
+ *   node scripts/sync-deployments-db.js --toggle <client> <0|1>
+ *                                                        # 0 = Deployable, 1 = Has Issue
  * 
- * Stack:
- *   'F' = Frontend (pride-erp-frontend)
- *   'B' = Backend  (pride-erp-backend)
- * 
- * is_deployable_to_client:
- *   0 = Deployable (Ready / Good to deploy)
- *   1 = Has an issue (Not deployable / Blocked)
+ * Table: SA_DEPLOYMENT_TRACKER (Frontend & Backend combined, no STACK column)
  */
 
 const fs = require('fs');
@@ -53,29 +48,28 @@ Pridebook Deployment Database CLI & Sync Tool
 Usage:
   node scripts/sync-deployments-db.js                  # Sync from GitHub & display table
   node scripts/sync-deployments-db.js --list           # Display current DB records without sync
-  node scripts/sync-deployments-db.js --toggle <client> <stack> <0|1>
+  node scripts/sync-deployments-db.js --toggle <client> <0|1>
                                                        # 0 = Deployable, 1 = Has Issue
 
 Examples:
-  node scripts/sync-deployments-db.js --toggle stage F 1      # Mark stage Frontend as having an issue
-  node scripts/sync-deployments-db.js --toggle stage F 0      # Mark stage Frontend as deployable
-  node scripts/sync-deployments-db.js --toggle shinshin B 0   # Mark shinshin Backend as deployable
+  node scripts/sync-deployments-db.js --toggle stage 1      # Mark stage as having an issue (1)
+  node scripts/sync-deployments-db.js --toggle stage 0      # Mark stage as deployable (0)
+  node scripts/sync-deployments-db.js --toggle shinshin 0   # Mark shinshin as deployable (0)
 `);
 }
 
 function displayTable(rows) {
   console.log(`\n Database: ${db.getActiveDbType()}`);
-  console.log(` Table: CLIENT_DEPLOYMENTS | Total Records: ${rows.length}\n`);
+  console.log(` Table: SA_DEPLOYMENT_TRACKER | Total Clients: ${rows.length}\n`);
 
   const formatted = rows.map(r => ({
-    'Client Box': r.client_name.toUpperCase(),
-    'Stack': r.stack === 'F' ? 'Frontend (F)' : 'Backend (B)',
-    'Version': r.version,
-    'Status': r.status,
-    'Deployable Flag': r.is_deployable_to_client === 0 ? '0 (Deployable)' : '1 (ISSUE - NOT DEPLOYABLE)',
-    'Deployed By': r.deployed_by || '-',
-    'Last Deployed': r.last_deployed_at ? r.last_deployed_at.replace('T', ' ').replace('Z', ' UTC') : 'Never',
-    'Run ID': r.run_id ? `#${r.run_id}` : '-'
+    'Client Box': (r.client_name || '').toUpperCase(),
+    'Frontend Version': r.frontend_version || 'unknown',
+    'Backend Version': r.backend_version || 'unknown',
+    'Status': r.status || 'pending',
+    'Deployable to Client': r.is_deployable_to_client === 0 ? '0 (✓ Deployable)' : '1 (⚠ ISSUE / BLOCKED)',
+    'Frontend Deployed At': r.frontend_deployed_at ? r.frontend_deployed_at.replace('T', ' ').replace('Z', ' UTC') : '-',
+    'Backend Deployed At': r.backend_deployed_at ? r.backend_deployed_at.replace('T', ' ').replace('Z', ' UTC') : '-'
   }));
 
   console.table(formatted);
@@ -93,15 +87,19 @@ async function main() {
     process.exit(0);
   }
 
-  // Handle manual toggle: --toggle <client> <stack> <0|1>
+  // Handle manual toggle: --toggle <client> <0|1>
   const toggleIdx = args.indexOf('--toggle');
   if (toggleIdx !== -1) {
     const client = args[toggleIdx + 1];
-    const stack = args[toggleIdx + 2];
-    const val = args[toggleIdx + 3];
+    let val = args[toggleIdx + 2];
 
-    if (!client || !stack || val === undefined) {
-      console.error('Error: --toggle requires <client> <stack(F|B)> <value(0|1)>');
+    // If user passed stack out of habit: --toggle <client> <stack> <val>
+    if (args[toggleIdx + 3] !== undefined && (val === 'F' || val === 'B' || val === 'f' || val === 'b')) {
+      val = args[toggleIdx + 3];
+    }
+
+    if (!client || val === undefined) {
+      console.error('Error: --toggle requires <client> <value(0|1)>');
       printUsage();
       process.exit(1);
     }
@@ -112,14 +110,14 @@ async function main() {
       process.exit(1);
     }
 
-    const updated = await db.updateDeployableFlag(client, stack.toUpperCase(), flagVal);
+    const updated = await db.updateDeployableFlag(client, flagVal);
     if (!updated) {
-      console.error(`Client ${client} [${stack.toUpperCase()}] not found in database.`);
+      console.error(`Client '${client}' not found in database.`);
       process.exit(1);
     }
 
-    console.log(` Updated ${client.toUpperCase()} [${stack.toUpperCase()}]:`);
-    console.log(`  is_deployable_to_client = ${flagVal} (${flagVal === 0 ? 'Deployable' : 'Has Issue / Not Deployable'})`);
+    console.log(` Updated ${client.toUpperCase()}:`);
+    console.log(`  is_deployable_to_client = ${flagVal} (${flagVal === 0 ? '✓ Deployable' : '⚠ Has Issue / Not Deployable'})`);
     console.log(`  Updated at: ${updated.updated_at}`);
     process.exit(0);
   }

@@ -29,6 +29,26 @@
     {
       "source": "/api/deployments/toggle-deployable",
       "destination": "/api/deployments/toggle-deployable"
+    },
+    {
+      "source": "/release",
+      "destination": "/release.html"
+    },
+    {
+      "source": "/api/deploy/tags",
+      "destination": "/api/deploy/tags"
+    },
+    {
+      "source": "/api/deploy/trigger",
+      "destination": "/api/deploy/trigger"
+    },
+    {
+      "source": "/api/deploy/status",
+      "destination": "/api/deploy/status"
+    },
+    {
+      "source": "/api/deploy/recent",
+      "destination": "/api/deploy/recent"
     }
   ],
   "headers": [

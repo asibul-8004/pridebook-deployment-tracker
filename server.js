@@ -10,6 +10,7 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const db = require('./db');
+const deployService = require('./deploy-service');
 
 const rootDir = __dirname;
 
@@ -50,6 +51,7 @@ const GITHUB_BRANCH = process.env.GITHUB_BRANCH || 'main';
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN || '';
 
 const htmlPath = path.join(rootDir, 'index.html');
+const releaseHtmlPath = path.join(rootDir, 'release.html');
 const jsonPath = path.join(rootDir, process.env.DEPLOYMENTS_FILE || 'deployments.json');
 const frontendJsonPath = fs.existsSync(path.join(rootDir, '..', 'pride-erp-frontend', 'deployments.json'))
   ? path.join(rootDir, '..', 'pride-erp-frontend', 'deployments.json')
@@ -435,6 +437,100 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ error: 'Invalid JSON payload: ' + err.message }));
       }
     });
+    return;
+  }
+
+  // GET /api/deploy/tags - Available release tags from both repos
+  if (pathname === '/api/deploy/tags' && req.method === 'GET') {
+    try {
+      const tags = await deployService.getReleaseTags(GITHUB_TOKEN);
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache, no-store, must-revalidate'
+      });
+      res.end(JSON.stringify({ success: true, tags }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: err.message }));
+    }
+    return;
+  }
+
+  // POST /api/deploy/trigger - Dual trigger release-deploy.yml for frontend and backend
+  if (pathname === '/api/deploy/trigger' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const payload = JSON.parse(body || '{}');
+        const result = await deployService.triggerDualDeploy({
+          client: payload.client,
+          frontend_tag: payload.frontend_tag,
+          backend_tag: payload.backend_tag,
+          token: GITHUB_TOKEN
+        });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // GET /api/deploy/status - Live deployment run status for dual cards
+  if (pathname === '/api/deploy/status' && req.method === 'GET') {
+    try {
+      const client = parsedUrl.searchParams.get('client') || '';
+      const frontend_tag = parsedUrl.searchParams.get('frontend_tag') || '';
+      const backend_tag = parsedUrl.searchParams.get('backend_tag') || '';
+      const status = await deployService.getDeployStatus({
+        client,
+        frontend_tag,
+        backend_tag,
+        token: GITHUB_TOKEN
+      });
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache, no-store, must-revalidate'
+      });
+      res.end(JSON.stringify({ success: true, ...status }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: err.message }));
+    }
+    return;
+  }
+
+  // GET /api/deploy/recent - Recent release workflow runs
+  if (pathname === '/api/deploy/recent' && req.method === 'GET') {
+    try {
+      const recent = await deployService.getRecentDeployments(GITHUB_TOKEN);
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache, no-store, must-revalidate'
+      });
+      res.end(JSON.stringify({ success: true, count: recent.length, data: recent }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: err.message }));
+    }
+    return;
+  }
+
+  // Serve Release Page
+  if (pathname === '/release' || pathname === '/release.html') {
+    if (fs.existsSync(releaseHtmlPath)) {
+      res.writeHead(200, {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-cache, no-store, must-revalidate'
+      });
+      res.end(fs.readFileSync(releaseHtmlPath, 'utf8'));
+    } else {
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('release.html not found');
+    }
     return;
   }
 

@@ -1,0 +1,19 @@
+{
+  "name": "pridebook-version-tracker",
+  "version": "1.0.0",
+  "description": "Two-tab single page Version Tracker application for Pridebook ERP client boxes and stage history",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js 3000",
+    "serve": "node server.js 3000"
+  },
+  "keywords": [
+    "pridebook",
+    "version-tracker",
+    "deployment-monitor",
+    "dashboard"
+  ],
+  "author": "Pridebook DevOps",
+  "license": "ISC"
+}

@@ -1,0 +1,27 @@
+{
+  "stage": {
+    "current": {
+      "version": "v1.39.1",
+      "status": "success",
+      "last_deployed_at": "2026-11-08T10:28:12Z",
+      "deployed_by": "asibul-8004",
+      "run_id": "42471364643"
+    },
+    "previous": null,
+    "history": []
+  },
+  "shinshin": {
+    "version": "unknown",
+    "status": "pending_first_deploy",
+    "last_deployed_at": null,
+    "deployed_by": null,
+    "run_id": null
+  },
+  "karupannya": {
+    "version": "unknown",
+    "status": "pending_first_deploy",
+    "last_deployed_at": null,
+    "deployed_by": null,
+    "run_id": null
+  }
+}

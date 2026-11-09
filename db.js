@@ -144,6 +144,7 @@ function initSqliteSchema(db) {
         backend_deployed_at TEXT,
         run_id TEXT,
         event_time TEXT,
+        is_deployable_to_client INTEGER NOT NULL DEFAULT 0 CHECK(is_deployable_to_client IN (0, 1)),
         created_at TEXT,
         FOREIGN KEY (deployment_tracker_no) REFERENCES SA_DEPLOYMENT_TRACKER(deployment_tracker_no) ON DELETE CASCADE
       );
@@ -151,6 +152,7 @@ function initSqliteSchema(db) {
       CREATE INDEX IF NOT EXISTS idx_sa_deploy_dtl_fk ON SA_DEPLOYMENT_TRACKER_DTL(deployment_tracker_no);
       CREATE INDEX IF NOT EXISTS idx_sa_deploy_dtl_client ON SA_DEPLOYMENT_TRACKER_DTL(client_name);
       CREATE INDEX IF NOT EXISTS idx_sa_deploy_dtl_time ON SA_DEPLOYMENT_TRACKER_DTL(event_time);
+      CREATE INDEX IF NOT EXISTS idx_sa_deploy_dtl_flag ON SA_DEPLOYMENT_TRACKER_DTL(is_deployable_to_client);
     `);
   } catch (err) {
     console.warn('[SQLite Schema Warn]:', err.message);
@@ -261,9 +263,9 @@ async function getDeploymentHistory(clientFilter) {
           dtl.deployed_by,
           dtl.frontend_deployed_at,
           dtl.backend_deployed_at,
-          dtl.run_id,
-          dtl.event_time,
-          COALESCE(m.is_deployable_to_client, 0) AS is_deployable_to_client
+          dtl.RUN_ID AS run_id,
+          dtl.EVENT_TIME AS event_time,
+          COALESCE(dtl.is_deployable_to_client, COALESCE(m.is_deployable_to_client, 0)) AS is_deployable_to_client
         FROM SA_DEPLOYMENT_TRACKER_DTL dtl
         LEFT JOIN SA_DEPLOYMENT_TRACKER m ON dtl.deployment_tracker_no = m.deployment_tracker_no
         WHERE 1=1
@@ -288,6 +290,67 @@ async function getDeploymentHistory(clientFilter) {
     return mergedHistoryCache.filter(h => h.client_name.toLowerCase() === clientFilter.toLowerCase());
   }
   return mergedHistoryCache;
+}
+
+/**
+ * Update the is_deployable_to_client flag on a specific history record in SA_DEPLOYMENT_TRACKER_DTL
+ */
+async function updateHistoryDeployableFlag(dtlId, flagValue) {
+  const flagVal = parseInt(flagValue, 10) === 1 ? 1 : 0;
+  const idNum = parseInt(dtlId, 10);
+
+  const oracle = getOracleModule();
+  if (oracle) {
+    try {
+      const rec = await oracle.updateHistoryDeployableFlag(dtlId, flagVal);
+      if (rec) {
+        // Also update memory cache
+        for (const h of mergedHistoryCache) {
+          if (h.id === idNum || h.deployment_tracker_dtl_no === idNum) {
+            h.is_deployable_to_client = flagVal;
+          }
+        }
+        return rec;
+      }
+    } catch (err) {
+      console.warn('[Oracle History Toggle Warn]:', err.message);
+    }
+  }
+
+  // SQLite fallback
+  const db = getSqliteDb();
+  if (db) {
+    try {
+      const stmt = db.prepare(`
+        UPDATE SA_DEPLOYMENT_TRACKER_DTL 
+        SET is_deployable_to_client = ?
+        WHERE deployment_tracker_dtl_no = ?
+      `);
+      stmt.run(flagVal, idNum);
+
+      const row = db.prepare(`SELECT * FROM SA_DEPLOYMENT_TRACKER_DTL WHERE deployment_tracker_dtl_no = ?`).get(idNum);
+      if (row) {
+        row.id = row.deployment_tracker_dtl_no;
+        for (const h of mergedHistoryCache) {
+          if (h.id === idNum || h.deployment_tracker_dtl_no === idNum) {
+            h.is_deployable_to_client = flagVal;
+          }
+        }
+        return row;
+      }
+    } catch (err) {
+      console.warn('[SQLite History Toggle Warn]:', err.message);
+    }
+  }
+
+  // In-memory fallback
+  for (const h of mergedHistoryCache) {
+    if (h.id === idNum || h.deployment_tracker_dtl_no === idNum) {
+      h.is_deployable_to_client = flagVal;
+      return h;
+    }
+  }
+  return null;
 }
 
 /**
@@ -741,8 +804,8 @@ async function getDeploymentsWithSync(options = {}) {
               INSERT INTO SA_DEPLOYMENT_TRACKER_DTL (
                 deployment_tracker_no, client_name, event_stack, frontend_version,
                 backend_version, status, deployed_by, frontend_deployed_at,
-                backend_deployed_at, run_id, event_time, created_at
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                backend_deployed_at, run_id, event_time, is_deployable_to_client, created_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `);
 
             for (const ev of fullTimeline) {
@@ -766,6 +829,7 @@ async function getDeploymentsWithSync(options = {}) {
                     ev.backend_deployed_at,
                     ev.run_id ? String(ev.run_id) : null,
                     ev.event_time,
+                    ev.is_deployable_to_client !== undefined ? parseInt(ev.is_deployable_to_client, 10) : 0,
                     new Date().toISOString()
                   );
                 }
@@ -821,6 +885,7 @@ module.exports = {
   getAllDeployments,
   getDeploymentHistory,
   updateDeployableFlag,
+  updateHistoryDeployableFlag,
   upsertDeployment,
   getDeploymentsWithSync,
   syncDatabaseFromGitHub,

@@ -1601,6 +1601,40 @@
       if (clientBadge) clientBadge.innerText = totalDeployments;
     }
 
+    // Toggle deployable flag for a specific history release in child table SA_DEPLOYMENT_TRACKER_DTL
+    async function handleHistoryDeployableToggle(dtlId, client, targetFlag) {
+      const idNum = parseInt(dtlId, 10);
+      const histItem = mergedHistory.find(h => (h.id === idNum || h.deployment_tracker_dtl_no === idNum));
+      if (histItem) {
+        histItem.is_deployable_to_client = targetFlag;
+        renderTab2History();
+      }
+
+      try {
+        const res = await fetch('/api/deployments/toggle-deployable', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            dtl_id: idNum,
+            client_name: client,
+            is_deployable_to_client: targetFlag
+          })
+        });
+
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const flagName = targetFlag === 0 ? '0 • Deployable' : '1 • Has Issue';
+        showToast(`✅ ${client.toUpperCase()} History (#${idNum}): ${flagName}`);
+      } catch (err) {
+        console.error('Failed to update history deployable flag in DB:', err);
+        showToast(`Could not persist to DB: ${err.message}`, 'error');
+        if (histItem) {
+          histItem.is_deployable_to_client = targetFlag === 0 ? 1 : 0;
+          renderTab2History();
+        }
+      }
+    }
+
     // Toggle deployable flag (0 = Deployable, 1 = Has Issue) and persist to DB
     async function handleDeployableToggle(id, client, targetFlag) {
       const rec = dbDeployments.find(item => (id && item.id === id) || ((item.client_name || '').toLowerCase() === client.toLowerCase()));
@@ -2089,11 +2123,10 @@
         const initials = getInitials(item.client_name);
         const isStage = (item.client_name || '').toLowerCase() === 'stage';
 
-        // Retrieve current deployable status for this client from dbDeployments
-        const clientRec = dbDeployments.find(c => (c.client_name || '').toLowerCase() === (item.client_name || '').toLowerCase());
-        const isDeployable = clientRec ? clientRec.is_deployable_to_client === 0 : true;
+        // Deployable status for this specific history record in SA_DEPLOYMENT_TRACKER_DTL
+        const dtlId = item.id || item.deployment_tracker_dtl_no || (idx + 1);
+        const isDeployable = (item.is_deployable_to_client === 0 || item.is_deployable_to_client === undefined || item.is_deployable_to_client === null);
         const targetFlag = isDeployable ? 1 : 0;
-        const clientId = clientRec ? (clientRec.id || clientRec.deployment_tracker_no) : `'${escapeHtml(item.client_name)}'`;
 
         const isFUnknown = !item.frontend_version || item.frontend_version === 'unknown';
         const isBUnknown = !item.backend_version || item.backend_version === 'unknown';
@@ -2161,7 +2194,7 @@
             <td>
               <button 
                 class="toggle-switch-btn ${isDeployable ? 'state-green' : 'state-red'}" 
-                onclick="handleDeployableToggle(${clientId}, '${escapeHtml(item.client_name)}', ${targetFlag})"
+                onclick="handleHistoryDeployableToggle(${dtlId}, '${escapeHtml(item.client_name)}', ${targetFlag})"
                 title="Click to toggle (Green 0: Deployable, Red 1: Has Issue)"
               >
                 <span class="toggle-slider">

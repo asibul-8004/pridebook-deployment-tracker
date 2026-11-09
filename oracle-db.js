@@ -203,7 +203,7 @@ async function getDeploymentHistory(clientFilter) {
         dtl.BACKEND_DEPLOYED_AT AS "backend_deployed_at",
         dtl.RUN_ID AS "run_id",
         dtl.EVENT_TIME AS "event_time",
-        NVL(m.IS_DEPLOYABLE_TO_CLIENT, 0) AS "is_deployable_to_client"
+        NVL(dtl.IS_DEPLOYABLE_TO_CLIENT, NVL(m.IS_DEPLOYABLE_TO_CLIENT, 0)) AS "is_deployable_to_client"
       FROM ${DTL_TABLE_NAME} dtl
       LEFT JOIN ${TABLE_NAME} m ON dtl.DEPLOYMENT_TRACKER_NO = m.DEPLOYMENT_TRACKER_NO
       WHERE 1=1
@@ -393,17 +393,20 @@ async function syncHistoryEvents(historyEvents) {
       if (exists === 0) {
         const dtlNo = await getNextTrackerDtlNo(conn);
         const now = new Date().toISOString();
+        const isDepVal = ev.is_deployable_to_client !== undefined ? parseInt(ev.is_deployable_to_client, 10) : 0;
         await conn.execute(
           `INSERT INTO ${DTL_TABLE_NAME} (
              DEPLOYMENT_TRACKER_DTL_NO, DEPLOYMENT_TRACKER_NO, CLIENT_NAME,
              EVENT_STACK, FRONTEND_VERSION, BACKEND_VERSION, STATUS,
              DEPLOYED_BY, FRONTEND_DEPLOYED_AT, BACKEND_DEPLOYED_AT,
-             RUN_ID, EVENT_TIME, SS_CREATED_ON, SS_MODIFIED_ON, SS_IS_DELETED, SS_IS_UPLOADED
+             RUN_ID, EVENT_TIME, IS_DEPLOYABLE_TO_CLIENT,
+             SS_CREATED_ON, SS_MODIFIED_ON, SS_IS_DELETED, SS_IS_UPLOADED
            ) VALUES (
              :dtlNo, :trackerNo, :client,
              :eventStack, :fVer, :bVer, :status,
              :deployedBy, :fAt, :bAt,
-             :runId, :eventTime, :now, :now, 0, 0
+             :runId, :eventTime, :isDeployable,
+             :now, :now, 0, 0
            )`,
           {
             dtlNo,
@@ -418,6 +421,7 @@ async function syncHistoryEvents(historyEvents) {
             bAt: ev.backend_deployed_at || null,
             runId,
             eventTime,
+            isDeployable: isDepVal,
             now
           }
         );
@@ -520,6 +524,55 @@ async function updateDeployableFlag(idOrClient, flagValue) {
 }
 
 /**
+ * Update the IS_DEPLOYABLE_TO_CLIENT flag on a specific history record in SA_DEPLOYMENT_TRACKER_DTL
+ */
+async function updateHistoryDeployableFlag(dtlId, flagValue) {
+  const conn = await getConnection();
+  const now = new Date().toISOString();
+  const flagVal = parseInt(flagValue, 10) === 1 ? 1 : 0;
+  const id = parseInt(dtlId, 10);
+
+  try {
+    await conn.execute(
+      `UPDATE ${DTL_TABLE_NAME} 
+       SET IS_DEPLOYABLE_TO_CLIENT = :flagVal, SS_MODIFIED_ON = :now
+       WHERE DEPLOYMENT_TRACKER_DTL_NO = :id`,
+      { flagVal, now, id }
+    );
+
+    const res = await conn.execute(
+      `SELECT 
+         dtl.DEPLOYMENT_TRACKER_DTL_NO AS "id", 
+         dtl.DEPLOYMENT_TRACKER_DTL_NO AS "deployment_tracker_dtl_no",
+         dtl.DEPLOYMENT_TRACKER_NO AS "deployment_tracker_no",
+         dtl.CLIENT_NAME AS "client_name",
+         dtl.EVENT_STACK AS "event_stack",
+         dtl.FRONTEND_VERSION AS "frontend_version",
+         dtl.BACKEND_VERSION AS "backend_version",
+         dtl.STATUS AS "status",
+         dtl.DEPLOYED_BY AS "deployed_by",
+         dtl.FRONTEND_DEPLOYED_AT AS "frontend_deployed_at",
+         dtl.BACKEND_DEPLOYED_AT AS "backend_deployed_at",
+         dtl.RUN_ID AS "run_id",
+         dtl.EVENT_TIME AS "event_time",
+         dtl.IS_DEPLOYABLE_TO_CLIENT AS "is_deployable_to_client"
+       FROM ${DTL_TABLE_NAME} dtl
+       WHERE dtl.DEPLOYMENT_TRACKER_DTL_NO = :id`,
+      { id }
+    );
+    return res.rows ? res.rows[0] : null;
+  } catch (err) {
+    if (err.message && err.message.includes('ORA-00942')) {
+      console.warn(`[Oracle Notice] Detail table ${DTL_TABLE_NAME} does not exist yet.`);
+      return null;
+    }
+    throw err;
+  } finally {
+    await conn.close();
+  }
+}
+
+/**
  * Close Oracle connection pool gracefully
  */
 async function closePool() {
@@ -539,6 +592,7 @@ module.exports = {
   upsertDeployment,
   syncHistoryEvents,
   updateDeployableFlag,
+  updateHistoryDeployableFlag,
   closePool,
   getConnectString,
   TABLE_NAME,

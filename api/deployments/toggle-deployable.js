@@ -14,19 +14,33 @@ module.exports = async (req, res) => {
     if (typeof body === 'string') {
       try { body = JSON.parse(body); } catch (e) {}
     }
-    const { id, client_name, client, is_deployable_to_client, is_deployable } = body || {};
-    const target = id || client_name || client;
+    const { id, dtl_id, history_id, client_name, client, is_deployable_to_client, is_deployable } = body || {};
     const rawFlag = is_deployable_to_client !== undefined ? is_deployable_to_client : is_deployable;
     const flagVal = parseInt(rawFlag, 10) === 1 ? 1 : 0;
 
+    const historyTarget = dtl_id || history_id;
+    if (historyTarget) {
+      // Toggle history release in child table SA_DEPLOYMENT_TRACKER_DTL
+      const record = await db.updateHistoryDeployableFlag(historyTarget, flagVal);
+      res.setHeader('Content-Type', 'application/json');
+      return res.status(200).json({
+        success: true,
+        table: 'SA_DEPLOYMENT_TRACKER_DTL',
+        message: flagVal === 0 ? 'History release marked as Deployable (0)' : 'History release marked as Has Issue (1)',
+        record
+      });
+    }
+
+    const target = id || client_name || client;
     if (!target) {
-      return res.status(400).json({ error: 'id or client_name required' });
+      return res.status(400).json({ error: 'dtl_id, id, or client_name required' });
     }
 
     const record = await db.updateDeployableFlag(target, flagVal);
     res.setHeader('Content-Type', 'application/json');
     return res.status(200).json({
       success: true,
+      table: 'SA_DEPLOYMENT_TRACKER',
       message: flagVal === 0 ? 'Marked as Deployable (0)' : 'Marked as Has Issue / Not Deployable (1)',
       record
     });

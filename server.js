@@ -270,14 +270,28 @@ const server = http.createServer(async (req, res) => {
       req.on('end', async () => {
         try {
           const payload = JSON.parse(body || '{}');
-          const { id, client_name, client, is_deployable_to_client, is_deployable } = payload;
-          const target = id || client_name || client;
+          const { id, dtl_id, history_id, client_name, client, is_deployable_to_client, is_deployable } = payload;
           const rawFlag = is_deployable_to_client !== undefined ? is_deployable_to_client : is_deployable;
           const flagVal = parseInt(rawFlag, 10) === 1 ? 1 : 0;
+          const historyTarget = dtl_id || history_id;
 
+          if (historyTarget) {
+            const record = await db.updateHistoryDeployableFlag(historyTarget, flagVal);
+            console.log(`[DB History Updated] DTL ID ${historyTarget}: is_deployable_to_client = ${flagVal}`);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              success: true,
+              table: 'SA_DEPLOYMENT_TRACKER_DTL',
+              message: flagVal === 0 ? 'History release marked as Deployable (0)' : 'History release marked as Has Issue (1)',
+              record
+            }));
+            return;
+          }
+
+          const target = id || client_name || client;
           if (!target) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'id or client_name required' }));
+            res.end(JSON.stringify({ error: 'dtl_id, id, or client_name required' }));
             return;
           }
 
@@ -287,6 +301,7 @@ const server = http.createServer(async (req, res) => {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({
             success: true,
+            table: 'SA_DEPLOYMENT_TRACKER',
             message: flagVal === 0 ? 'Marked as Deployable (0)' : 'Marked as Has Issue / Not Deployable (1)',
             record
           }));

@@ -5,6 +5,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const db = require('./db');
 
 const rootDir = __dirname;
 function getEnv(key, fallback = '') {
@@ -220,8 +221,36 @@ async function getDeployStatus({ client, frontend_tag, backend_tag, token }) {
 async function getRecentDeployments(token) {
   const fRepo = getEnv('GITHUB_FRONTEND_REPO') || getEnv('GITHUB_REPO') || 'pride-erp-local/pride-erp-frontend';
   const bRepo = getEnv('GITHUB_BACKEND_REPO') || (getEnv('GITHUB_REPO') ? getEnv('GITHUB_REPO').replace(/-frontend$/, '-backend') : '') || 'pride-erp-local/pride-erp-backend';
-  const headers = getHeaders(token);
 
+  // 1. Primary: Use DB deployment history (SA_DEPLOYMENT_TRACKER_DTL) which already contains client_box
+  try {
+    const history = await db.getDeploymentHistory();
+    if (Array.isArray(history) && history.length > 0) {
+      return history.slice(0, 15).map(h => {
+        const isBackend = h.event_stack === 'B';
+        const repo = isBackend ? bRepo : fRepo;
+        const version = isBackend ? h.backend_version : h.frontend_version;
+        return {
+          stack: isBackend ? 'Backend' : 'Frontend',
+          client: (h.client_name || 'stage').toLowerCase(),
+          id: h.run_id || h.deployment_tracker_dtl_no,
+          run_number: h.run_id ? String(h.run_id).slice(-4) : h.deployment_tracker_dtl_no,
+          name: isBackend ? 'Release Deploy (API)' : 'Release Deploy',
+          version: version || 'unknown',
+          status: h.status || 'success',
+          conclusion: h.status || 'success',
+          run_url: h.run_id ? `https://github.com/${repo}/actions/runs/${h.run_id}` : '#',
+          actor: h.deployed_by || 'system',
+          created_at: h.event_time || h.frontend_deployed_at || h.backend_deployed_at || new Date().toISOString()
+        };
+      });
+    }
+  } catch (err) {
+    console.warn('[Recent Runs DB fallback warn]:', err.message);
+  }
+
+  // 2. Fallback to GitHub API if DB is not available
+  const headers = getHeaders(token);
   async function fetchRecent(repo, stack) {
     try {
       const url = `https://api.github.com/repos/${repo}/actions/workflows/release-deploy.yml/runs?per_page=6`;
@@ -230,9 +259,11 @@ async function getRecentDeployments(token) {
       const data = await res.json();
       return (data.workflow_runs || []).map(r => ({
         stack,
+        client: 'stage',
         id: r.id,
         run_number: r.run_number,
         name: r.name,
+        version: '',
         status: r.status,
         conclusion: r.conclusion,
         run_url: r.html_url,

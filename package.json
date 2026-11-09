@@ -4,6 +4,7 @@
   "description": "Two-tab single page Version Tracker application for Pridebook ERP client boxes and stage history",
   "main": "server.js",
   "scripts": {
+    "build": "echo 'Build complete'",
     "start": "node server.js",
     "dev": "node server.js 3000",
     "serve": "node server.js 3000"

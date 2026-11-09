@@ -48,7 +48,27 @@ Instead of modifying `pride-erp-frontend` files (`Dockerfile`, `angular.json`, `
 
 ---
 
-## How to Run
+## Deploy to Vercel
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fasibul-8004%2Fpridebook-deployment-tracker&env=GITHUB_TOKEN,GITHUB_REPO,GITHUB_BRANCH,SOURCE_MODE&envDescription=Configuration%20for%20fetching%20deployments.json%20from%20GitHub)
+
+### Steps to Deploy via Vercel Web Dashboard:
+
+1. Go to [vercel.com](https://vercel.com) and log in with your GitHub account.
+2. Click **Add New...** -> **Project**.
+3. Under **Import Git Repository**, select **`asibul-8004/pridebook-deployment-tracker`** and click **Import**.
+4. In the **Environment Variables** section, add:
+   - `GITHUB_TOKEN`: `ghp_...` (Your GitHub Personal Access Token)
+   - `GITHUB_REPO`: `pride-erp-local/pride-erp-frontend`
+   - `GITHUB_BRANCH`: `main`
+   - `SOURCE_MODE`: `github`
+5. Click **Deploy**.
+
+Vercel will build the project and assign a production URL (e.g., `https://pridebook-deployment-tracker.vercel.app`).
+
+---
+
+## How to Run Locally
 
 1. Configure environment variables (optional for public repositories, required for private repositories):
 ```bash

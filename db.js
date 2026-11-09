@@ -14,14 +14,46 @@
 
 const fs = require('fs');
 const path = require('path');
-const { DatabaseSync } = require('node:sqlite');
+let DatabaseSync = null;
+try {
+  DatabaseSync = require('node:sqlite').DatabaseSync;
+} catch (e) {
+  // node:sqlite not supported in this runtime
+}
 
 const rootDir = __dirname;
-const DB_PATH = process.env.DB_PATH || path.join(rootDir, 'deployments.db');
 
+// Detect serverless or read-only filesystem environments (Vercel, AWS Lambda)
+function resolveDbPath() {
+  if (process.env.DB_PATH) return process.env.DB_PATH;
+
+  const isServerless = Boolean(
+    process.env.VERCEL ||
+    process.env.AWS_LAMBDA_FUNCTION_NAME ||
+    process.env.LAMBDA_TASK_ROOT ||
+    process.env.NOW_REGION
+  );
+
+  if (isServerless) {
+    return path.join('/tmp', 'deployments.db');
+  }
+
+  // Test whether root directory is writable
+  try {
+    const testFile = path.join(rootDir, `.write_test_${Date.now()}`);
+    fs.writeFileSync(testFile, '1');
+    fs.unlinkSync(testFile);
+    return path.join(rootDir, 'deployments.db');
+  } catch (e) {
+    return path.join('/tmp', 'deployments.db');
+  }
+}
+
+let activeDbPath = resolveDbPath();
 let sqliteInstance = null;
 let oracleDb = null;
 let mergedHistoryCache = [];
+const inMemoryStore = new Map();
 
 function isOracleConfigured() {
   const dbType = (process.env.DB_TYPE || '').toLowerCase();
@@ -40,35 +72,58 @@ function getOracleModule() {
 }
 
 function getSqliteDb() {
-  if (!sqliteInstance) {
-    sqliteInstance = new DatabaseSync(DB_PATH);
+  if (sqliteInstance) return sqliteInstance;
+  if (!DatabaseSync) return null;
+
+  const targetPath = resolveDbPath();
+  try {
+    sqliteInstance = new DatabaseSync(targetPath);
     initSqliteSchema(sqliteInstance);
+    activeDbPath = targetPath;
+    return sqliteInstance;
+  } catch (err) {
+    console.warn(`[SQLite Warn] Could not open database at ${targetPath}: ${err.message}. Falling back to in-memory SQLite.`);
   }
-  return sqliteInstance;
+
+  // Fallback to in-memory SQLite (:memory:)
+  try {
+    sqliteInstance = new DatabaseSync(':memory:');
+    initSqliteSchema(sqliteInstance);
+    activeDbPath = ':memory:';
+    return sqliteInstance;
+  } catch (memErr) {
+    console.warn(`[SQLite Warn] In-memory SQLite failed: ${memErr.message}`);
+    sqliteInstance = null;
+    return null;
+  }
 }
 
 function initSqliteSchema(db) {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS SA_DEPLOYMENT_TRACKER (
-      deployment_tracker_no INTEGER PRIMARY KEY AUTOINCREMENT,
-      client_name TEXT NOT NULL UNIQUE,
-      frontend_version TEXT DEFAULT 'unknown',
-      backend_version TEXT DEFAULT 'unknown',
-      status TEXT DEFAULT 'pending_first_deploy',
-      deployed_by TEXT DEFAULT 'system',
-      frontend_deployed_at TEXT,
-      backend_deployed_at TEXT,
-      frontend_run_id TEXT,
-      backend_run_id TEXT,
-      is_deployable_to_client INTEGER NOT NULL DEFAULT 0 CHECK(is_deployable_to_client IN (0, 1)),
-      issue_notes TEXT DEFAULT '',
-      synced_at TEXT,
-      updated_at TEXT
-    );
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS SA_DEPLOYMENT_TRACKER (
+        deployment_tracker_no INTEGER PRIMARY KEY AUTOINCREMENT,
+        client_name TEXT NOT NULL UNIQUE,
+        frontend_version TEXT DEFAULT 'unknown',
+        backend_version TEXT DEFAULT 'unknown',
+        status TEXT DEFAULT 'pending_first_deploy',
+        deployed_by TEXT DEFAULT 'system',
+        frontend_deployed_at TEXT,
+        backend_deployed_at TEXT,
+        frontend_run_id TEXT,
+        backend_run_id TEXT,
+        is_deployable_to_client INTEGER NOT NULL DEFAULT 0 CHECK(is_deployable_to_client IN (0, 1)),
+        issue_notes TEXT DEFAULT '',
+        synced_at TEXT,
+        updated_at TEXT
+      );
 
-    CREATE INDEX IF NOT EXISTS idx_sa_deploy_client ON SA_DEPLOYMENT_TRACKER(client_name);
-    CREATE INDEX IF NOT EXISTS idx_sa_deploy_flag ON SA_DEPLOYMENT_TRACKER(is_deployable_to_client);
-  `);
+      CREATE INDEX IF NOT EXISTS idx_sa_deploy_client ON SA_DEPLOYMENT_TRACKER(client_name);
+      CREATE INDEX IF NOT EXISTS idx_sa_deploy_flag ON SA_DEPLOYMENT_TRACKER(is_deployable_to_client);
+    `);
+  } catch (err) {
+    console.warn('[SQLite Schema Warn]:', err.message);
+  }
 }
 
 /**
@@ -86,44 +141,60 @@ async function getAllDeployments(filters = {}) {
 
   // SQLite fallback
   const db = getSqliteDb();
-  let sql = `
-    SELECT 
-      deployment_tracker_no AS id,
-      deployment_tracker_no,
-      client_name,
-      frontend_version,
-      backend_version,
-      status,
-      deployed_by,
-      frontend_deployed_at,
-      backend_deployed_at,
-      frontend_run_id,
-      backend_run_id,
-      is_deployable_to_client,
-      issue_notes,
-      synced_at,
-      updated_at
-    FROM SA_DEPLOYMENT_TRACKER
-    WHERE 1=1
-  `;
-  const params = [];
+  if (db) {
+    try {
+      let sql = `
+        SELECT 
+          deployment_tracker_no AS id,
+          deployment_tracker_no,
+          client_name,
+          frontend_version,
+          backend_version,
+          status,
+          deployed_by,
+          frontend_deployed_at,
+          backend_deployed_at,
+          frontend_run_id,
+          backend_run_id,
+          is_deployable_to_client,
+          issue_notes,
+          synced_at,
+          updated_at
+        FROM SA_DEPLOYMENT_TRACKER
+        WHERE 1=1
+      `;
+      const params = [];
 
+      if (filters.client_name) {
+        sql += ` AND LOWER(client_name) = LOWER(?)`;
+        params.push(filters.client_name);
+      }
+
+      if (filters.is_deployable !== undefined && filters.is_deployable !== null) {
+        sql += ` AND is_deployable_to_client = ?`;
+        params.push(parseInt(filters.is_deployable, 10));
+      }
+
+      sql += ` ORDER BY 
+        CASE WHEN LOWER(client_name) = 'stage' THEN 0 ELSE 1 END,
+        client_name ASC`;
+
+      const stmt = db.prepare(sql);
+      return stmt.all(...params);
+    } catch (err) {
+      console.warn('[SQLite Query Warn]:', err.message);
+    }
+  }
+
+  // In-memory fallback
+  let list = Array.from(inMemoryStore.values());
   if (filters.client_name) {
-    sql += ` AND LOWER(client_name) = LOWER(?)`;
-    params.push(filters.client_name);
+    list = list.filter(r => (r.client_name || '').toLowerCase() === filters.client_name.toLowerCase());
   }
-
   if (filters.is_deployable !== undefined && filters.is_deployable !== null) {
-    sql += ` AND is_deployable_to_client = ?`;
-    params.push(parseInt(filters.is_deployable, 10));
+    list = list.filter(r => r.is_deployable_to_client === parseInt(filters.is_deployable, 10));
   }
-
-  sql += ` ORDER BY 
-    CASE WHEN LOWER(client_name) = 'stage' THEN 0 ELSE 1 END,
-    client_name ASC`;
-
-  const stmt = db.prepare(sql);
-  return stmt.all(...params);
+  return list;
 }
 
 /**
@@ -139,35 +210,60 @@ async function updateDeployableFlag(idOrClient, flagValue) {
     }
   }
 
-  // SQLite fallback
-  const db = getSqliteDb();
   const now = new Date().toISOString();
   const flagVal = parseInt(flagValue, 10) === 1 ? 1 : 0;
   const isNum = !isNaN(Number(idOrClient)) && String(idOrClient).trim() !== '';
 
-  if (isNum) {
-    const id = parseInt(idOrClient, 10);
-    const stmt = db.prepare(`
-      UPDATE SA_DEPLOYMENT_TRACKER 
-      SET is_deployable_to_client = ?, updated_at = ?
-      WHERE deployment_tracker_no = ?
-    `);
-    stmt.run(flagVal, now, id);
+  // SQLite fallback
+  const db = getSqliteDb();
+  if (db) {
+    try {
+      if (isNum) {
+        const id = parseInt(idOrClient, 10);
+        const stmt = db.prepare(`
+          UPDATE SA_DEPLOYMENT_TRACKER 
+          SET is_deployable_to_client = ?, updated_at = ?
+          WHERE deployment_tracker_no = ?
+        `);
+        stmt.run(flagVal, now, id);
 
-    const selectStmt = db.prepare(`SELECT * FROM SA_DEPLOYMENT_TRACKER WHERE deployment_tracker_no = ?`);
-    return selectStmt.get(id);
-  } else {
-    const client_name = String(idOrClient).toLowerCase().trim();
-    const stmt = db.prepare(`
-      UPDATE SA_DEPLOYMENT_TRACKER 
-      SET is_deployable_to_client = ?, updated_at = ?
-      WHERE LOWER(client_name) = LOWER(?)
-    `);
-    stmt.run(flagVal, now, client_name);
+        const selectStmt = db.prepare(`SELECT * FROM SA_DEPLOYMENT_TRACKER WHERE deployment_tracker_no = ?`);
+        const row = selectStmt.get(id);
+        if (row && row.client_name) {
+          const m = inMemoryStore.get(row.client_name.toLowerCase());
+          if (m) m.is_deployable_to_client = flagVal;
+        }
+        return row;
+      } else {
+        const client_name = String(idOrClient).toLowerCase().trim();
+        const stmt = db.prepare(`
+          UPDATE SA_DEPLOYMENT_TRACKER 
+          SET is_deployable_to_client = ?, updated_at = ?
+          WHERE LOWER(client_name) = LOWER(?)
+        `);
+        stmt.run(flagVal, now, client_name);
 
-    const selectStmt = db.prepare(`SELECT * FROM SA_DEPLOYMENT_TRACKER WHERE LOWER(client_name) = LOWER(?)`);
-    return selectStmt.get(client_name);
+        const selectStmt = db.prepare(`SELECT * FROM SA_DEPLOYMENT_TRACKER WHERE LOWER(client_name) = LOWER(?)`);
+        const row = selectStmt.get(client_name);
+        const m = inMemoryStore.get(client_name);
+        if (m) m.is_deployable_to_client = flagVal;
+        return row;
+      }
+    } catch (err) {
+      console.warn('[SQLite Update Warn]:', err.message);
+    }
   }
+
+  // In-memory fallback
+  const targetKey = String(idOrClient).toLowerCase().trim();
+  for (const [key, val] of inMemoryStore.entries()) {
+    if (key === targetKey || String(val.deployment_tracker_no) === String(idOrClient) || String(val.id) === String(idOrClient)) {
+      val.is_deployable_to_client = flagVal;
+      val.updated_at = now;
+      return val;
+    }
+  }
+  return null;
 }
 
 /**
@@ -183,44 +279,70 @@ async function upsertDeployment(record) {
     }
   }
 
-  // SQLite fallback
-  const db = getSqliteDb();
   const now = new Date().toISOString();
   const client_name = String(record.client_name).toLowerCase().trim();
 
-  const stmt = db.prepare(`
-    INSERT INTO SA_DEPLOYMENT_TRACKER (
-      client_name, frontend_version, backend_version, status, deployed_by,
-      frontend_deployed_at, backend_deployed_at, frontend_run_id, backend_run_id,
-      is_deployable_to_client, synced_at, updated_at
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
-    ON CONFLICT(client_name) DO UPDATE SET
-      frontend_version = excluded.frontend_version,
-      backend_version = excluded.backend_version,
-      status = excluded.status,
-      deployed_by = excluded.deployed_by,
-      frontend_deployed_at = excluded.frontend_deployed_at,
-      backend_deployed_at = excluded.backend_deployed_at,
-      frontend_run_id = excluded.frontend_run_id,
-      backend_run_id = excluded.backend_run_id,
-      synced_at = excluded.synced_at,
-      updated_at = excluded.updated_at
-  `);
+  // SQLite fallback
+  const db = getSqliteDb();
+  if (db) {
+    try {
+      const stmt = db.prepare(`
+        INSERT INTO SA_DEPLOYMENT_TRACKER (
+          client_name, frontend_version, backend_version, status, deployed_by,
+          frontend_deployed_at, backend_deployed_at, frontend_run_id, backend_run_id,
+          is_deployable_to_client, synced_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+        ON CONFLICT(client_name) DO UPDATE SET
+          frontend_version = excluded.frontend_version,
+          backend_version = excluded.backend_version,
+          status = excluded.status,
+          deployed_by = excluded.deployed_by,
+          frontend_deployed_at = excluded.frontend_deployed_at,
+          backend_deployed_at = excluded.backend_deployed_at,
+          frontend_run_id = excluded.frontend_run_id,
+          backend_run_id = excluded.backend_run_id,
+          synced_at = excluded.synced_at,
+          updated_at = excluded.updated_at
+      `);
 
-  stmt.run(
+      stmt.run(
+        client_name,
+        record.frontend_version || 'unknown',
+        record.backend_version || 'unknown',
+        record.status || 'pending_first_deploy',
+        record.deployed_by || 'system',
+        record.frontend_deployed_at || null,
+        record.backend_deployed_at || null,
+        record.frontend_run_id ? String(record.frontend_run_id) : null,
+        record.backend_run_id ? String(record.backend_run_id) : null,
+        now,
+        now
+      );
+    } catch (err) {
+      console.warn('[SQLite Upsert Warn]:', err.message);
+    }
+  }
+
+  // Secondary in-memory cache update
+  const existing = inMemoryStore.get(client_name) || { is_deployable_to_client: 0, deployment_tracker_no: inMemoryStore.size + 1 };
+  inMemoryStore.set(client_name, {
+    id: existing.deployment_tracker_no || inMemoryStore.size + 1,
+    deployment_tracker_no: existing.deployment_tracker_no || inMemoryStore.size + 1,
     client_name,
-    record.frontend_version || 'unknown',
-    record.backend_version || 'unknown',
-    record.status || 'pending_first_deploy',
-    record.deployed_by || 'system',
-    record.frontend_deployed_at || null,
-    record.backend_deployed_at || null,
-    record.frontend_run_id ? String(record.frontend_run_id) : null,
-    record.backend_run_id ? String(record.backend_run_id) : null,
-    now,
-    now
-  );
+    frontend_version: record.frontend_version || 'unknown',
+    backend_version: record.backend_version || 'unknown',
+    status: record.status || 'pending_first_deploy',
+    deployed_by: record.deployed_by || 'system',
+    frontend_deployed_at: record.frontend_deployed_at || null,
+    backend_deployed_at: record.backend_deployed_at || null,
+    frontend_run_id: record.frontend_run_id ? String(record.frontend_run_id) : null,
+    backend_run_id: record.backend_run_id ? String(record.backend_run_id) : null,
+    is_deployable_to_client: existing.is_deployable_to_client ?? 0,
+    issue_notes: record.issue_notes || null,
+    synced_at: now,
+    updated_at: now
+  });
 }
 
 /**
@@ -478,5 +600,8 @@ module.exports = {
   syncDatabaseFromGitHub,
   getMergedHistory,
   getActiveDbType,
-  DB_PATH
+  get DB_PATH() {
+    return activeDbPath;
+  },
+  resolveDbPath
 };

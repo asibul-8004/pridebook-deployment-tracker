@@ -13,6 +13,22 @@
     {
       "source": "/api/config",
       "destination": "/api/config"
+    },
+    {
+      "source": "/api/db/deployments",
+      "destination": "/api/db/deployments"
+    },
+    {
+      "source": "/api/db/sync",
+      "destination": "/api/db/sync"
+    },
+    {
+      "source": "/api/deployments/history",
+      "destination": "/api/deployments/history"
+    },
+    {
+      "source": "/api/deployments/toggle-deployable",
+      "destination": "/api/deployments/toggle-deployable"
     }
   ],
   "headers": [

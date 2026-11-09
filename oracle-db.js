@@ -47,15 +47,24 @@ async function getPool() {
       poolMin: 1,
       poolMax: 10,
       poolIncrement: 1,
-      poolTimeout: 60
+      poolTimeout: 10,
+      connectTimeout: 4
     });
   }
   return pool;
 }
 
 async function getConnection() {
-  const p = await getPool();
-  return await p.getConnection();
+  const timeoutMs = 4000;
+  return await Promise.race([
+    (async () => {
+      const p = await getPool();
+      return await p.getConnection();
+    })(),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`Oracle connection timed out after ${timeoutMs}ms`)), timeoutMs)
+    )
+  ]);
 }
 
 /**

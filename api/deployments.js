@@ -15,8 +15,9 @@ module.exports = async (req, res) => {
   const branch = process.env.GITHUB_BRANCH || 'main';
   const token = process.env.GITHUB_TOKEN || '';
   const mode = (req.query && req.query.source) || process.env.SOURCE_MODE || 'github';
+  const shouldFetchGitHub = mode === 'github' || (mode !== 'local' && Boolean(token && token.length > 5));
 
-  if (mode === 'github') {
+  if (shouldFetchGitHub) {
     try {
       const url = `https://api.github.com/repos/${repo}/contents/deployments.json?ref=${branch}`;
       const headers = {

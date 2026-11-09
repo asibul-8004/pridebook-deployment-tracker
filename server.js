@@ -155,7 +155,7 @@ const server = http.createServer(async (req, res) => {
     });
     res.end(JSON.stringify({
       port: PORT,
-      sourceMode: SOURCE_MODE,
+      sourceMode: Boolean(GITHUB_TOKEN && GITHUB_TOKEN.length > 5) ? 'github' : SOURCE_MODE,
       githubRepo: GITHUB_REPO,
       githubBranch: GITHUB_BRANCH,
       hasServerToken: Boolean(GITHUB_TOKEN && GITHUB_TOKEN.length > 5)
@@ -166,9 +166,10 @@ const server = http.createServer(async (req, res) => {
   // GET /deployments.json or /api/deployments
   if ((pathname === '/deployments.json' || pathname === '/api/deployments') && req.method === 'GET') {
     let data = {};
-    const mode = parsedUrl.searchParams.get('source') || SOURCE_MODE;
+    const requestedMode = parsedUrl.searchParams.get('source');
+    const shouldFetchGitHub = requestedMode === 'github' || (requestedMode !== 'local' && Boolean(GITHUB_TOKEN && GITHUB_TOKEN.length > 5));
 
-    if (mode === 'github') {
+    if (shouldFetchGitHub) {
       try {
         data = await fetchDeploymentsGitHub();
       } catch (err) {
@@ -177,6 +178,11 @@ const server = http.createServer(async (req, res) => {
       }
     } else {
       data = readDeploymentsLocal();
+      if ((!data || Object.keys(data).length === 0) && GITHUB_TOKEN) {
+        try {
+          data = await fetchDeploymentsGitHub();
+        } catch (e) {}
+      }
     }
 
     const shouldNormalize = parsedUrl.searchParams.get('normalized') === 'true';

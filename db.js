@@ -137,12 +137,9 @@ function loadRegisteredClientsFromDisk() {
 
 function initSqliteSchema(db) {
   try {
-    // Migration: ensure is_deployable_to_client and is_backend_deployable columns exist on pre-existing SQLite databases
+    // Migration: ensure is_deployable_to_client exists on master, and both flags exist on DTL
     try {
       db.exec(`ALTER TABLE SA_DEPLOYMENT_TRACKER ADD COLUMN is_deployable_to_client INTEGER NOT NULL DEFAULT 0;`);
-    } catch (e) {}
-    try {
-      db.exec(`ALTER TABLE SA_DEPLOYMENT_TRACKER ADD COLUMN is_backend_deployable INTEGER NOT NULL DEFAULT 0;`);
     } catch (e) {}
     try {
       db.exec(`ALTER TABLE SA_DEPLOYMENT_TRACKER_DTL ADD COLUMN is_deployable_to_client INTEGER NOT NULL DEFAULT 0;`);
@@ -165,7 +162,6 @@ function initSqliteSchema(db) {
         frontend_run_id TEXT,
         backend_run_id TEXT,
         is_deployable_to_client INTEGER NOT NULL DEFAULT 0 CHECK(is_deployable_to_client IN (0, 1)),
-        is_backend_deployable INTEGER NOT NULL DEFAULT 0 CHECK(is_backend_deployable IN (0, 1)),
         issue_notes TEXT DEFAULT '',
         synced_at TEXT,
         updated_at TEXT
@@ -173,7 +169,6 @@ function initSqliteSchema(db) {
 
       CREATE INDEX IF NOT EXISTS idx_sa_deploy_client ON SA_DEPLOYMENT_TRACKER(client_name);
       CREATE INDEX IF NOT EXISTS idx_sa_deploy_flag ON SA_DEPLOYMENT_TRACKER(is_deployable_to_client);
-      CREATE INDEX IF NOT EXISTS idx_sa_deploy_b_flag ON SA_DEPLOYMENT_TRACKER(is_backend_deployable);
     `);
 
     // Child Detail Table: SA_DEPLOYMENT_TRACKER_DTL
@@ -429,7 +424,7 @@ async function getDeploymentHistory(clientFilter) {
           dtl.RUN_ID AS run_id,
           dtl.EVENT_TIME AS event_time,
           COALESCE(dtl.is_deployable_to_client, COALESCE(m.is_deployable_to_client, 0)) AS is_deployable_to_client,
-          COALESCE(dtl.is_backend_deployable, COALESCE(m.is_backend_deployable, 0)) AS is_backend_deployable
+          COALESCE(dtl.is_backend_deployable, 0) AS is_backend_deployable
         FROM SA_DEPLOYMENT_TRACKER_DTL dtl
         LEFT JOIN SA_DEPLOYMENT_TRACKER m ON dtl.deployment_tracker_no = m.deployment_tracker_no
         WHERE 1=1

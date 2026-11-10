@@ -173,7 +173,6 @@ async function getAllDeployments(filters = {}) {
         FRONTEND_RUN_ID AS "frontend_run_id",
         BACKEND_RUN_ID AS "backend_run_id",
         IS_DEPLOYABLE_TO_CLIENT AS "is_deployable_to_client",
-        NVL(IS_BACKEND_DEPLOYABLE, 0) AS "is_backend_deployable",
         ISSUE_NOTES AS "issue_notes",
         SYNCED_AT AS "synced_at",
         UPDATED_AT AS "updated_at",
@@ -240,7 +239,7 @@ async function getDeploymentHistory(clientFilter) {
         dtl.RUN_ID AS "run_id",
         dtl.EVENT_TIME AS "event_time",
         NVL(dtl.IS_DEPLOYABLE_TO_CLIENT, NVL(m.IS_DEPLOYABLE_TO_CLIENT, 0)) AS "is_deployable_to_client",
-        NVL(dtl.IS_BACKEND_DEPLOYABLE, NVL(m.IS_BACKEND_DEPLOYABLE, 0)) AS "is_backend_deployable"
+        NVL(dtl.IS_BACKEND_DEPLOYABLE, 0) AS "is_backend_deployable"
       FROM ${DTL_TABLE_NAME} dtl
       LEFT JOIN ${TABLE_NAME} m ON dtl.DEPLOYMENT_TRACKER_NO = m.DEPLOYMENT_TRACKER_NO
       WHERE 1=1

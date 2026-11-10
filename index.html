@@ -2078,7 +2078,7 @@
       Object.keys(clientStats).forEach(c => {
         if (!uniqueClients.includes(c)) uniqueClients.push(c);
       });
-      (allDbDeployments || []).forEach(d => {
+      (dbDeployments || []).forEach(d => {
         const c = (d.client_name || '').toLowerCase();
         if (c && !uniqueClients.includes(c)) uniqueClients.push(c);
       });

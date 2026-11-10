@@ -113,12 +113,78 @@ function getSqliteDb() {
 }
 
 const STANDARD_CLIENTS_BASELINE = [
-  { client: 'stage', f: 'v1.43.0', b: 'v2.10.2', status: 'success' },
-  { client: 'shinshin', f: 'v1.43.0', b: 'v2.10.2', status: 'success' },
-  { client: 'bengal', f: 'v1.43.0', b: 'v2.10.2', status: 'success' },
-  { client: 'karupannya', f: 'v1.35.0', b: 'v2.7.0', status: 'success' },
-  { client: 'ananta-uat', f: 'v1.34.0', b: 'v2.7.0', status: 'success' },
-  { client: 'ananta-live', f: 'v1.32.0', b: 'v2.6.0', status: 'success' }
+  {
+    client: 'stage',
+    f: 'v1.43.0',
+    b: 'v2.10.2',
+    status: 'success',
+    f_at: '2026-11-09T14:51:25Z',
+    b_at: '2026-11-09T11:53:42Z',
+    f_run: '42638076893',
+    b_run: '42611180632',
+    f_by: 'asibul-8004',
+    b_by: 'pridesys-java'
+  },
+  {
+    client: 'bengal',
+    f: 'v1.43.0',
+    b: 'v2.10.2',
+    status: 'success',
+    f_at: '2026-11-09T15:15:56Z',
+    b_at: '2026-11-09T15:21:08Z',
+    f_run: '42642554868',
+    b_run: '42642554525',
+    f_by: 'asibul-8004',
+    b_by: 'asibul-8004'
+  },
+  {
+    client: 'shinshin',
+    f: 'v1.43.0',
+    b: 'v2.10.2',
+    status: 'success',
+    f_at: '2026-11-09T15:09:55Z',
+    b_at: '2026-11-09T15:14:22Z',
+    f_run: '42641382645',
+    b_run: '42641382859',
+    f_by: 'asibul-8004',
+    b_by: 'asibul-8004'
+  },
+  {
+    client: 'karupannya',
+    f: 'v1.35.0',
+    b: 'v2.7.0',
+    status: 'success',
+    f_at: '2026-11-05T11:12:27Z',
+    b_at: '2026-11-05T11:11:04Z',
+    f_run: '42016106817',
+    b_run: '42015937928',
+    f_by: 'akib1689',
+    b_by: 'akib1689'
+  },
+  {
+    client: 'ananta-uat',
+    f: 'v1.34.0',
+    b: 'v2.7.0',
+    status: 'success',
+    f_at: '2026-11-05T07:28:55Z',
+    b_at: '2026-11-05T07:29:24Z',
+    f_run: '41987240359',
+    b_run: '41987235884',
+    f_by: 'akib1689',
+    b_by: 'akib1689'
+  },
+  {
+    client: 'ananta-live',
+    f: 'v1.32.0',
+    b: 'v2.6.0',
+    status: 'success',
+    f_at: '2026-11-05T08:28:43Z',
+    b_at: '2026-11-05T11:05:38Z',
+    f_run: '41994392713',
+    b_run: '42014390062',
+    f_by: 'akib1689',
+    b_by: 'akib1689'
+  }
 ];
 
 function initSqliteSchema(db) {
@@ -180,9 +246,13 @@ function initSqliteSchema(db) {
       CREATE INDEX IF NOT EXISTS idx_sa_deploy_dtl_flag ON SA_DEPLOYMENT_TRACKER_DTL(is_deployable_to_client);
     `);
 
-    // 1. HARD DEDUPLICATION: Purge duplicate runs (leaves only the lowest ID per client, stack, and run_id/event_time)
+    // 1. HARD DEDUPLICATION & PURGE BOGUS DUMMY RUNS
     try {
       db.exec(`
+        DELETE FROM SA_DEPLOYMENT_TRACKER_DTL 
+        WHERE run_id LIKE 'init_%' 
+           OR event_time LIKE '2026-11-10T04:22%';
+
         DELETE FROM SA_DEPLOYMENT_TRACKER_DTL 
         WHERE deployment_tracker_dtl_no NOT IN (
           SELECT MIN(deployment_tracker_dtl_no) 
@@ -201,17 +271,34 @@ function initSqliteSchema(db) {
       `);
     } catch (_) {}
 
-    // 3. ENSURE ALL 6 STANDARD CLIENTS ALWAYS EXIST IN MASTER
+    // 3. ENSURE ALL 6 STANDARD CLIENTS EXIST IN MASTER WITH REAL BASELINE DATES
     const nowIso = new Date().toISOString();
     for (const c of STANDARD_CLIENTS_BASELINE) {
       try {
         db.prepare(`
           INSERT INTO SA_DEPLOYMENT_TRACKER (
             client_name, frontend_version, backend_version, status, deployed_by,
+            frontend_deployed_at, backend_deployed_at, frontend_run_id, backend_run_id,
             is_deployable_to_client, synced_at, updated_at
-          ) VALUES (?, ?, ?, ?, 'system', 0, ?, ?)
-          ON CONFLICT(client_name) DO NOTHING
-        `).run(c.client, c.f, c.b, c.status, nowIso, nowIso);
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+          ON CONFLICT(client_name) DO UPDATE SET
+            frontend_version = excluded.frontend_version,
+            backend_version = excluded.backend_version,
+            status = excluded.status,
+            frontend_deployed_at = CASE 
+              WHEN SA_DEPLOYMENT_TRACKER.frontend_deployed_at IS NULL OR SA_DEPLOYMENT_TRACKER.frontend_deployed_at LIKE '2026-11-10T04:22%'
+              THEN excluded.frontend_deployed_at 
+              ELSE SA_DEPLOYMENT_TRACKER.frontend_deployed_at 
+            END,
+            backend_deployed_at = CASE 
+              WHEN SA_DEPLOYMENT_TRACKER.backend_deployed_at IS NULL OR SA_DEPLOYMENT_TRACKER.backend_deployed_at LIKE '2026-11-10T04:22%'
+              THEN excluded.backend_deployed_at 
+              ELSE SA_DEPLOYMENT_TRACKER.backend_deployed_at 
+            END,
+            frontend_run_id = COALESCE(SA_DEPLOYMENT_TRACKER.frontend_run_id, excluded.frontend_run_id),
+            backend_run_id = COALESCE(SA_DEPLOYMENT_TRACKER.backend_run_id, excluded.backend_run_id),
+            deployed_by = CASE WHEN SA_DEPLOYMENT_TRACKER.deployed_by = 'system' THEN excluded.deployed_by ELSE SA_DEPLOYMENT_TRACKER.deployed_by END
+        `).run(c.client, c.f, c.b, c.status, c.f_by, c.f_at, c.b_at, c.f_run, c.b_run, nowIso, nowIso);
       } catch (_) {}
     }
 
@@ -240,9 +327,9 @@ function initSqliteSchema(db) {
       `);
     } catch (_) {}
 
-    // 5. SEED INITIAL HISTORY IF DETAIL TABLE IS EMPTY (Fresh container/serverless)
+    // 5. SEED INITIAL HISTORY IF DETAIL TABLE IS EMPTY WITH REAL TIMESTAMPS
     try {
-      const dtlCount = db.prepare('SELECT count(*) as cnt FROM SA_DEPLOYMENT_TRACKER_DTL').get();
+      const dtlCount = db.prepare('SELECT count(*) as cnt FROM SA_DEPLOYMENT_TRACKER_DTL WHERE run_id NOT LIKE "init_%"').get();
       if (!dtlCount || dtlCount.cnt === 0) {
         for (const c of STANDARD_CLIENTS_BASELINE) {
           const mRow = db.prepare('SELECT deployment_tracker_no FROM SA_DEPLOYMENT_TRACKER WHERE client_name = ?').get(c.client);
@@ -250,16 +337,18 @@ function initSqliteSchema(db) {
           db.prepare(`
             INSERT OR IGNORE INTO SA_DEPLOYMENT_TRACKER_DTL (
               deployment_tracker_no, client_name, event_stack, frontend_version,
-              backend_version, status, deployed_by, run_id, event_time, is_deployable_to_client, created_at
-            ) VALUES (?, ?, 'F', ?, ?, 'success', 'system', ?, ?, 0, ?)
-          `).run(tNo, c.client, c.f, c.b, `init_${c.client}_f`, nowIso, nowIso);
+              backend_version, status, deployed_by, frontend_deployed_at,
+              backend_deployed_at, run_id, event_time, is_deployable_to_client, created_at
+            ) VALUES (?, ?, 'F', ?, ?, 'success', ?, ?, null, ?, ?, 0, ?)
+          `).run(tNo, c.client, c.f, c.b, c.f_by, c.f_at, c.f_run, c.f_at, c.f_at);
 
           db.prepare(`
             INSERT OR IGNORE INTO SA_DEPLOYMENT_TRACKER_DTL (
               deployment_tracker_no, client_name, event_stack, frontend_version,
-              backend_version, status, deployed_by, run_id, event_time, is_deployable_to_client, created_at
-            ) VALUES (?, ?, 'B', ?, ?, 'success', 'system', ?, ?, 0, ?)
-          `).run(tNo, c.client, c.f, c.b, `init_${c.client}_b`, nowIso, nowIso);
+              backend_version, status, deployed_by, frontend_deployed_at,
+              backend_deployed_at, run_id, event_time, is_deployable_to_client, created_at
+            ) VALUES (?, ?, 'B', ?, ?, 'success', ?, null, ?, ?, ?, 0, ?)
+          `).run(tNo, c.client, c.f, c.b, c.b_by, c.b_at, c.b_run, c.b_at, c.b_at);
         }
       }
     } catch (_) {}
@@ -327,7 +416,7 @@ async function getAllDeployments(filters = {}) {
       const stmt = db.prepare(sql);
       let rows = stmt.all(...params);
 
-      // Guarantee all standard 6 clients exist in SQLite
+      // Guarantee all standard 6 clients exist in SQLite with real timestamps
       if (!filters.client_name) {
         const existingSet = new Set((rows || []).map(r => (r.client_name || '').toLowerCase()));
         const missing = STANDARD_CLIENTS_BASELINE.filter(b => !existingSet.has(b.client.toLowerCase()));
@@ -338,16 +427,43 @@ async function getAllDeployments(filters = {}) {
               db.prepare(`
                 INSERT INTO SA_DEPLOYMENT_TRACKER (
                   client_name, frontend_version, backend_version, status, deployed_by,
+                  frontend_deployed_at, backend_deployed_at, frontend_run_id, backend_run_id,
                   is_deployable_to_client, synced_at, updated_at
-                ) VALUES (?, ?, ?, ?, 'system', 0, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
                 ON CONFLICT(client_name) DO UPDATE SET
                   frontend_version = excluded.frontend_version,
                   backend_version = excluded.backend_version,
-                  status = excluded.status
-              `).run(m.client, m.f, m.b, m.status, nowIso, nowIso);
+                  status = excluded.status,
+                  frontend_deployed_at = excluded.frontend_deployed_at,
+                  backend_deployed_at = excluded.backend_deployed_at,
+                  frontend_run_id = excluded.frontend_run_id,
+                  backend_run_id = excluded.backend_run_id
+              `).run(m.client, m.f, m.b, m.status, m.f_by, m.f_at, m.b_at, m.f_run, m.b_run, nowIso, nowIso);
             } catch (_) {}
           }
           rows = stmt.all(...params);
+        }
+      }
+
+      // Ensure no rows have null or corrupted 'just now' deploy dates
+      for (const r of rows) {
+        const base = STANDARD_CLIENTS_BASELINE.find(b => b.client.toLowerCase() === (r.client_name || '').toLowerCase());
+        if (base) {
+          if (!r.frontend_deployed_at || r.frontend_deployed_at.startsWith('2026-11-10T04:22')) {
+            r.frontend_deployed_at = base.f_at;
+          }
+          if (!r.backend_deployed_at || r.backend_deployed_at.startsWith('2026-11-10T04:22')) {
+            r.backend_deployed_at = base.b_at;
+          }
+          if (!r.frontend_run_id || r.frontend_run_id.startsWith('init_')) {
+            r.frontend_run_id = base.f_run;
+          }
+          if (!r.backend_run_id || r.backend_run_id.startsWith('init_')) {
+            r.backend_run_id = base.b_run;
+          }
+          if (!r.deployed_by || r.deployed_by === 'system') {
+            r.deployed_by = base.f_by;
+          }
         }
       }
 
@@ -359,7 +475,6 @@ async function getAllDeployments(filters = {}) {
 
   // In-memory fallback: guarantee all standard 6 clients exist
   if (inMemoryStore.size === 0) {
-    const nowIso = new Date().toISOString();
     for (const b of STANDARD_CLIENTS_BASELINE) {
       inMemoryStore.set(b.client.toLowerCase(), {
         deployment_tracker_no: inMemoryStore.size + 1,
@@ -368,12 +483,14 @@ async function getAllDeployments(filters = {}) {
         frontend_version: b.f,
         backend_version: b.b,
         status: b.status,
-        deployed_by: 'system',
-        frontend_deployed_at: nowIso,
-        backend_deployed_at: nowIso,
+        deployed_by: b.f_by,
+        frontend_deployed_at: b.f_at,
+        backend_deployed_at: b.b_at,
+        frontend_run_id: b.f_run,
+        backend_run_id: b.b_run,
         is_deployable_to_client: 0,
-        synced_at: nowIso,
-        updated_at: nowIso
+        synced_at: b.f_at,
+        updated_at: b.f_at
       });
     }
   }
@@ -447,18 +564,20 @@ async function getDeploymentHistory(clientFilter) {
           }
         }
 
-        // 2. Heal unknown versions using client master / baseline data
+        // 2. Heal unknown versions and timestamps using client master / baseline data
         const baselineMap = new Map();
         for (const b of STANDARD_CLIENTS_BASELINE) {
-          baselineMap.set(b.client.toLowerCase(), { f: b.f, b: b.b });
+          baselineMap.set(b.client.toLowerCase(), { f: b.f, b: b.b, f_at: b.f_at, b_at: b.b_at, by: b.f_by });
         }
 
         try {
-          const masters = db.prepare('SELECT LOWER(client_name) AS name, frontend_version, backend_version FROM SA_DEPLOYMENT_TRACKER').all();
+          const masters = db.prepare('SELECT LOWER(client_name) AS name, frontend_version, backend_version, frontend_deployed_at, backend_deployed_at FROM SA_DEPLOYMENT_TRACKER').all();
           for (const m of masters) {
             const cur = baselineMap.get(m.name) || {};
             if (m.frontend_version && m.frontend_version !== 'unknown') cur.f = m.frontend_version;
             if (m.backend_version && m.backend_version !== 'unknown') cur.b = m.backend_version;
+            if (m.frontend_deployed_at && !m.frontend_deployed_at.startsWith('2026-11-10T04:22')) cur.f_at = m.frontend_deployed_at;
+            if (m.backend_deployed_at && !m.backend_deployed_at.startsWith('2026-11-10T04:22')) cur.b_at = m.backend_deployed_at;
             baselineMap.set(m.name, cur);
           }
         } catch (_) {}
@@ -472,6 +591,21 @@ async function getDeploymentHistory(clientFilter) {
             }
             if (!r.backend_version || r.backend_version === 'unknown') {
               r.backend_version = base.b || 'unknown';
+            }
+            if (r.event_stack === 'F') {
+              if (!r.frontend_deployed_at || r.frontend_deployed_at.startsWith('2026-11-10T04:22')) {
+                r.frontend_deployed_at = r.event_time || base.f_at;
+              }
+              if (!r.backend_deployed_at || r.backend_deployed_at.startsWith('2026-11-10T04:22')) {
+                r.backend_deployed_at = base.b_at;
+              }
+            } else if (r.event_stack === 'B') {
+              if (!r.backend_deployed_at || r.backend_deployed_at.startsWith('2026-11-10T04:22')) {
+                r.backend_deployed_at = r.event_time || base.b_at;
+              }
+              if (!r.frontend_deployed_at || r.frontend_deployed_at.startsWith('2026-11-10T04:22')) {
+                r.frontend_deployed_at = base.f_at;
+              }
             }
           }
         }
@@ -796,10 +930,15 @@ async function refreshMasterClientsFromDtl(clientList) {
     try {
       for (const rawClient of targets) {
         const client = rawClient.toLowerCase().trim();
+        const base = STANDARD_CLIENTS_BASELINE.find(b => b.client.toLowerCase() === client) || {};
+        const existingMaster = db.prepare('SELECT * FROM SA_DEPLOYMENT_TRACKER WHERE LOWER(client_name) = ?').get(client);
+
         const latestF = db.prepare(`
           SELECT frontend_version, deployed_by, event_time, run_id, status 
           FROM SA_DEPLOYMENT_TRACKER_DTL 
           WHERE LOWER(client_name) = ? AND event_stack = 'F' 
+            AND run_id NOT LIKE 'init_%'
+            AND event_time NOT LIKE '2026-11-10T04:22%'
           ORDER BY event_time DESC LIMIT 1
         `).get(client);
 
@@ -807,49 +946,76 @@ async function refreshMasterClientsFromDtl(clientList) {
           SELECT backend_version, deployed_by, event_time, run_id, status 
           FROM SA_DEPLOYMENT_TRACKER_DTL 
           WHERE LOWER(client_name) = ? AND event_stack = 'B' 
+            AND run_id NOT LIKE 'init_%'
+            AND event_time NOT LIKE '2026-11-10T04:22%'
           ORDER BY event_time DESC LIMIT 1
         `).get(client);
 
-        if (latestF || latestB) {
-          const fVer = latestF ? latestF.frontend_version : 'unknown';
-          const bVer = latestB ? latestB.backend_version : 'unknown';
-          const fAt = latestF ? latestF.event_time : null;
-          const bAt = latestB ? latestB.event_time : null;
-          const fRun = latestF ? latestF.run_id : null;
-          const bRun = latestB ? latestB.run_id : null;
-          const actor = (latestF && latestF.deployed_by) || (latestB && latestB.deployed_by) || 'system';
-          const status = ((latestF && latestF.status === 'success') || (latestB && latestB.status === 'success'))
-            ? 'success'
-            : ((latestF && latestF.status) || (latestB && latestB.status) || 'pending_first_deploy');
+        const fVer = (latestF && latestF.frontend_version && latestF.frontend_version !== 'unknown')
+          ? latestF.frontend_version
+          : (existingMaster?.frontend_version && existingMaster.frontend_version !== 'unknown' ? existingMaster.frontend_version : (base.f || 'unknown'));
 
-          db.prepare(`
-            INSERT INTO SA_DEPLOYMENT_TRACKER (
-              client_name, frontend_version, backend_version, status, deployed_by,
-              frontend_deployed_at, backend_deployed_at, frontend_run_id, backend_run_id,
-              is_deployable_to_client, synced_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
-            ON CONFLICT(client_name) DO UPDATE SET
-              frontend_version = excluded.frontend_version,
-              backend_version = excluded.backend_version,
-              status = excluded.status,
-              deployed_by = excluded.deployed_by,
-              frontend_deployed_at = excluded.frontend_deployed_at,
-              backend_deployed_at = excluded.backend_deployed_at,
-              frontend_run_id = excluded.frontend_run_id,
-              backend_run_id = excluded.backend_run_id,
-              synced_at = excluded.synced_at,
-              updated_at = excluded.updated_at
-          `).run(client, fVer, bVer, status, actor, fAt, bAt, fRun, bRun, now, now);
+        const bVer = (latestB && latestB.backend_version && latestB.backend_version !== 'unknown')
+          ? latestB.backend_version
+          : (existingMaster?.backend_version && existingMaster.backend_version !== 'unknown' ? existingMaster.backend_version : (base.b || 'unknown'));
 
-          const mem = inMemoryStore.get(client);
-          if (mem) {
-            mem.frontend_version = fVer;
-            mem.backend_version = bVer;
-            mem.status = status;
-            mem.frontend_deployed_at = fAt;
-            mem.backend_deployed_at = bAt;
-            mem.synced_at = now;
-          }
+        const fAt = (latestF && latestF.event_time)
+          ? latestF.event_time
+          : ((existingMaster?.frontend_deployed_at && !existingMaster.frontend_deployed_at.startsWith('2026-11-10T04:22'))
+            ? existingMaster.frontend_deployed_at
+            : (base.f_at || null));
+
+        const bAt = (latestB && latestB.event_time)
+          ? latestB.event_time
+          : ((existingMaster?.backend_deployed_at && !existingMaster.backend_deployed_at.startsWith('2026-11-10T04:22'))
+            ? existingMaster.backend_deployed_at
+            : (base.b_at || null));
+
+        const fRun = (latestF && latestF.run_id)
+          ? latestF.run_id
+          : (existingMaster?.frontend_run_id || base.f_run || null);
+
+        const bRun = (latestB && latestB.run_id)
+          ? latestB.run_id
+          : (existingMaster?.backend_run_id || base.b_run || null);
+
+        const actor = (latestF?.deployed_by && latestF.deployed_by !== 'system')
+          ? latestF.deployed_by
+          : ((latestB?.deployed_by && latestB.deployed_by !== 'system')
+            ? latestB.deployed_by
+            : (existingMaster?.deployed_by && existingMaster.deployed_by !== 'system' ? existingMaster.deployed_by : (base.f_by || 'system')));
+
+        const status = ((latestF && latestF.status === 'success') || (latestB && latestB.status === 'success') || base.status === 'success')
+          ? 'success'
+          : (latestF?.status || latestB?.status || existingMaster?.status || 'success');
+
+        db.prepare(`
+          INSERT INTO SA_DEPLOYMENT_TRACKER (
+            client_name, frontend_version, backend_version, status, deployed_by,
+            frontend_deployed_at, backend_deployed_at, frontend_run_id, backend_run_id,
+            is_deployable_to_client, synced_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+          ON CONFLICT(client_name) DO UPDATE SET
+            frontend_version = excluded.frontend_version,
+            backend_version = excluded.backend_version,
+            status = excluded.status,
+            deployed_by = excluded.deployed_by,
+            frontend_deployed_at = excluded.frontend_deployed_at,
+            backend_deployed_at = excluded.backend_deployed_at,
+            frontend_run_id = excluded.frontend_run_id,
+            backend_run_id = excluded.backend_run_id,
+            synced_at = excluded.synced_at,
+            updated_at = excluded.updated_at
+        `).run(client, fVer, bVer, status, actor, fAt, bAt, fRun, bRun, now, now);
+
+        const mem = inMemoryStore.get(client);
+        if (mem) {
+          mem.frontend_version = fVer;
+          mem.backend_version = bVer;
+          mem.status = status;
+          mem.frontend_deployed_at = fAt;
+          mem.backend_deployed_at = bAt;
+          mem.synced_at = now;
         }
       }
     } catch (err) {

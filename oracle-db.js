@@ -173,6 +173,7 @@ async function getAllDeployments(filters = {}) {
         FRONTEND_RUN_ID AS "frontend_run_id",
         BACKEND_RUN_ID AS "backend_run_id",
         IS_DEPLOYABLE_TO_CLIENT AS "is_deployable_to_client",
+        NVL(IS_BACKEND_DEPLOYABLE, 0) AS "is_backend_deployable",
         ISSUE_NOTES AS "issue_notes",
         SYNCED_AT AS "synced_at",
         UPDATED_AT AS "updated_at",
@@ -238,7 +239,8 @@ async function getDeploymentHistory(clientFilter) {
         dtl.BACKEND_DEPLOYED_AT AS "backend_deployed_at",
         dtl.RUN_ID AS "run_id",
         dtl.EVENT_TIME AS "event_time",
-        NVL(dtl.IS_DEPLOYABLE_TO_CLIENT, NVL(m.IS_DEPLOYABLE_TO_CLIENT, 0)) AS "is_deployable_to_client"
+        NVL(dtl.IS_DEPLOYABLE_TO_CLIENT, NVL(m.IS_DEPLOYABLE_TO_CLIENT, 0)) AS "is_deployable_to_client",
+        NVL(dtl.IS_BACKEND_DEPLOYABLE, NVL(m.IS_BACKEND_DEPLOYABLE, 0)) AS "is_backend_deployable"
       FROM ${DTL_TABLE_NAME} dtl
       LEFT JOIN ${TABLE_NAME} m ON dtl.DEPLOYMENT_TRACKER_NO = m.DEPLOYMENT_TRACKER_NO
       WHERE 1=1
@@ -251,7 +253,64 @@ async function getDeploymentHistory(clientFilter) {
     sql += ` ORDER BY dtl.EVENT_TIME DESC, dtl.DEPLOYMENT_TRACKER_DTL_NO DESC`;
 
     const result = await conn.execute(sql, binds);
-    return result.rows || [];
+    const rows = result.rows || [];
+
+    if (rows.length === 0) return [];
+
+    // Group by client and deduplicate by (frontend_run_id, backend_run_id) and point-in-time versions
+    const byClient = {};
+    for (const r of rows) {
+      const c = (r.client_name || '').toLowerCase();
+      if (!byClient[c]) byClient[c] = [];
+      byClient[c].push(r);
+    }
+
+    const dedupedHistory = [];
+    for (const [cName, clientRows] of Object.entries(byClient)) {
+      clientRows.sort((a, b) => new Date(b.event_time || 0) - new Date(a.event_time || 0));
+
+      const seenRuns = new Set();
+      const seenCombos = new Set();
+
+      for (let i = 0; i < clientRows.length; i++) {
+        const r = clientRows[i];
+
+        if (r.event_stack === 'F') {
+          r.frontend_run_id = r.run_id;
+          r.frontend_deployed_at = r.event_time || r.frontend_deployed_at;
+          let otherB = clientRows.slice(i).find(x => x.event_stack === 'B') || clientRows.find(x => x.event_stack === 'B');
+          if (otherB) {
+            if (!r.backend_version || r.backend_version === 'unknown') r.backend_version = otherB.backend_version;
+            r.backend_deployed_at = otherB.event_time || otherB.backend_deployed_at;
+            r.backend_run_id = otherB.run_id;
+          }
+        } else if (r.event_stack === 'B') {
+          r.backend_run_id = r.run_id;
+          r.backend_deployed_at = r.event_time || r.backend_deployed_at;
+          let otherF = clientRows.slice(i).find(x => x.event_stack === 'F') || clientRows.find(x => x.event_stack === 'F');
+          if (otherF) {
+            if (!r.frontend_version || r.frontend_version === 'unknown') r.frontend_version = otherF.frontend_version;
+            r.frontend_deployed_at = otherF.event_time || otherF.frontend_deployed_at;
+            r.frontend_run_id = otherF.run_id;
+          }
+        }
+
+        const runKey = (r.frontend_run_id && r.backend_run_id) 
+          ? `${cName}|${r.frontend_run_id}|${r.backend_run_id}` 
+          : null;
+        const comboKey = `${cName}|${r.frontend_version || ''}|${r.backend_version || ''}|${r.frontend_deployed_at || ''}|${r.backend_deployed_at || ''}`;
+
+        if ((runKey && seenRuns.has(runKey)) || seenCombos.has(comboKey)) {
+          continue;
+        }
+        if (runKey) seenRuns.add(runKey);
+        seenCombos.add(comboKey);
+        dedupedHistory.push(r);
+      }
+    }
+
+    dedupedHistory.sort((a, b) => new Date(b.event_time || 0) - new Date(a.event_time || 0));
+    return dedupedHistory;
   } catch (err) {
     if (err.message && err.message.includes('ORA-00942')) {
       // Table SA_DEPLOYMENT_TRACKER_DTL does not exist yet
@@ -592,18 +651,21 @@ async function updateDeployableFlag(idOrClient, flagValue) {
 }
 
 /**
- * Update the IS_DEPLOYABLE_TO_CLIENT flag on a specific history record in SA_DEPLOYMENT_TRACKER_DTL
+ * Update the deployable flag on a specific history record in SA_DEPLOYMENT_TRACKER_DTL
+ * Supports stackType = 'frontend' (IS_DEPLOYABLE_TO_CLIENT) or 'backend' (IS_BACKEND_DEPLOYABLE)
  */
-async function updateHistoryDeployableFlag(dtlId, flagValue) {
+async function updateHistoryDeployableFlag(dtlId, flagValue, stackType = 'frontend') {
   const conn = await getConnection();
   const now = new Date().toISOString();
   const flagVal = parseInt(flagValue, 10) === 1 ? 1 : 0;
   const id = parseInt(dtlId, 10);
+  const isBackend = stackType === 'backend' || stackType === 'B';
+  const colName = isBackend ? 'IS_BACKEND_DEPLOYABLE' : 'IS_DEPLOYABLE_TO_CLIENT';
 
   try {
     await conn.execute(
       `UPDATE ${DTL_TABLE_NAME} 
-       SET IS_DEPLOYABLE_TO_CLIENT = :flagVal, SS_MODIFIED_ON = :now
+       SET ${colName} = :flagVal, SS_MODIFIED_ON = :now
        WHERE DEPLOYMENT_TRACKER_DTL_NO = :id`,
       { flagVal, now, id },
       { autoCommit: true }
@@ -625,7 +687,8 @@ async function updateHistoryDeployableFlag(dtlId, flagValue) {
          dtl.BACKEND_DEPLOYED_AT AS "backend_deployed_at",
          dtl.RUN_ID AS "run_id",
          dtl.EVENT_TIME AS "event_time",
-         dtl.IS_DEPLOYABLE_TO_CLIENT AS "is_deployable_to_client"
+         dtl.IS_DEPLOYABLE_TO_CLIENT AS "is_deployable_to_client",
+         NVL(dtl.IS_BACKEND_DEPLOYABLE, 0) AS "is_backend_deployable"
        FROM ${DTL_TABLE_NAME} dtl
        WHERE dtl.DEPLOYMENT_TRACKER_DTL_NO = :id`,
       { id }

@@ -137,12 +137,18 @@ function loadRegisteredClientsFromDisk() {
 
 function initSqliteSchema(db) {
   try {
-    // Migration: ensure is_deployable_to_client column exists on pre-existing SQLite databases
+    // Migration: ensure is_deployable_to_client and is_backend_deployable columns exist on pre-existing SQLite databases
     try {
       db.exec(`ALTER TABLE SA_DEPLOYMENT_TRACKER ADD COLUMN is_deployable_to_client INTEGER NOT NULL DEFAULT 0;`);
     } catch (e) {}
     try {
+      db.exec(`ALTER TABLE SA_DEPLOYMENT_TRACKER ADD COLUMN is_backend_deployable INTEGER NOT NULL DEFAULT 0;`);
+    } catch (e) {}
+    try {
       db.exec(`ALTER TABLE SA_DEPLOYMENT_TRACKER_DTL ADD COLUMN is_deployable_to_client INTEGER NOT NULL DEFAULT 0;`);
+    } catch (e) {}
+    try {
+      db.exec(`ALTER TABLE SA_DEPLOYMENT_TRACKER_DTL ADD COLUMN is_backend_deployable INTEGER NOT NULL DEFAULT 0;`);
     } catch (e) {}
 
     // Master Table: SA_DEPLOYMENT_TRACKER
@@ -159,6 +165,7 @@ function initSqliteSchema(db) {
         frontend_run_id TEXT,
         backend_run_id TEXT,
         is_deployable_to_client INTEGER NOT NULL DEFAULT 0 CHECK(is_deployable_to_client IN (0, 1)),
+        is_backend_deployable INTEGER NOT NULL DEFAULT 0 CHECK(is_backend_deployable IN (0, 1)),
         issue_notes TEXT DEFAULT '',
         synced_at TEXT,
         updated_at TEXT
@@ -166,6 +173,7 @@ function initSqliteSchema(db) {
 
       CREATE INDEX IF NOT EXISTS idx_sa_deploy_client ON SA_DEPLOYMENT_TRACKER(client_name);
       CREATE INDEX IF NOT EXISTS idx_sa_deploy_flag ON SA_DEPLOYMENT_TRACKER(is_deployable_to_client);
+      CREATE INDEX IF NOT EXISTS idx_sa_deploy_b_flag ON SA_DEPLOYMENT_TRACKER(is_backend_deployable);
     `);
 
     // Child Detail Table: SA_DEPLOYMENT_TRACKER_DTL
@@ -184,6 +192,7 @@ function initSqliteSchema(db) {
         run_id TEXT,
         event_time TEXT,
         is_deployable_to_client INTEGER NOT NULL DEFAULT 0 CHECK(is_deployable_to_client IN (0, 1)),
+        is_backend_deployable INTEGER NOT NULL DEFAULT 0 CHECK(is_backend_deployable IN (0, 1)),
         created_at TEXT,
         FOREIGN KEY (deployment_tracker_no) REFERENCES SA_DEPLOYMENT_TRACKER(deployment_tracker_no) ON DELETE CASCADE
       );
@@ -192,6 +201,7 @@ function initSqliteSchema(db) {
       CREATE INDEX IF NOT EXISTS idx_sa_deploy_dtl_client ON SA_DEPLOYMENT_TRACKER_DTL(client_name);
       CREATE INDEX IF NOT EXISTS idx_sa_deploy_dtl_time ON SA_DEPLOYMENT_TRACKER_DTL(event_time);
       CREATE INDEX IF NOT EXISTS idx_sa_deploy_dtl_flag ON SA_DEPLOYMENT_TRACKER_DTL(is_deployable_to_client);
+      CREATE INDEX IF NOT EXISTS idx_sa_deploy_dtl_b_flag ON SA_DEPLOYMENT_TRACKER_DTL(is_backend_deployable);
     `);
 
     // 1. HARD DEDUPLICATION & PURGE BOGUS DUMMY RUNS
@@ -418,7 +428,8 @@ async function getDeploymentHistory(clientFilter) {
           dtl.backend_deployed_at,
           dtl.RUN_ID AS run_id,
           dtl.EVENT_TIME AS event_time,
-          COALESCE(dtl.is_deployable_to_client, COALESCE(m.is_deployable_to_client, 0)) AS is_deployable_to_client
+          COALESCE(dtl.is_deployable_to_client, COALESCE(m.is_deployable_to_client, 0)) AS is_deployable_to_client,
+          COALESCE(dtl.is_backend_deployable, COALESCE(m.is_backend_deployable, 0)) AS is_backend_deployable
         FROM SA_DEPLOYMENT_TRACKER_DTL dtl
         LEFT JOIN SA_DEPLOYMENT_TRACKER m ON dtl.deployment_tracker_no = m.deployment_tracker_no
         WHERE 1=1
@@ -433,54 +444,95 @@ async function getDeploymentHistory(clientFilter) {
       const stmt = db.prepare(sql);
       const rows = stmt.all(...params);
       if (rows && rows.length > 0) {
-        // 1. In-memory deduplication by client_name + event_stack + (run_id || event_time)
-        const seen = new Set();
-        const deduped = [];
+        // Group by client
+        const byClient = {};
         for (const r of rows) {
-          const key = `${(r.client_name || '').toLowerCase()}_${r.event_stack}_${r.run_id || r.event_time}`;
-          if (!seen.has(key)) {
-            seen.add(key);
-            deduped.push(r);
-          }
+          const c = (r.client_name || '').toLowerCase();
+          if (!byClient[c]) byClient[c] = [];
+          byClient[c].push(r);
         }
 
-        // 2. Heal unknown versions and timestamps using client master records
+        // Get master map for any missing baseline info
         const masterMap = new Map();
         try {
-          const masters = db.prepare('SELECT LOWER(client_name) AS name, frontend_version, backend_version, frontend_deployed_at, backend_deployed_at, deployed_by FROM SA_DEPLOYMENT_TRACKER').all();
+          const masters = db.prepare('SELECT LOWER(client_name) AS name, frontend_version, backend_version, frontend_deployed_at, backend_deployed_at, deployed_by, frontend_run_id, backend_run_id FROM SA_DEPLOYMENT_TRACKER').all();
           for (const m of masters) {
             masterMap.set(m.name, m);
           }
         } catch (_) {}
 
-        for (const r of deduped) {
-          const cName = (r.client_name || '').toLowerCase();
+        const dedupedHistory = [];
+
+        for (const [cName, clientRows] of Object.entries(byClient)) {
+          // Sort descending by event_time
+          clientRows.sort((a, b) => new Date(b.event_time || 0) - new Date(a.event_time || 0));
+
           const master = masterMap.get(cName);
-          if (master) {
-            if (!r.frontend_version || r.frontend_version === 'unknown') {
-              r.frontend_version = (master.frontend_version && master.frontend_version !== 'unknown') ? master.frontend_version : 'unknown';
-            }
-            if (!r.backend_version || r.backend_version === 'unknown') {
-              r.backend_version = (master.backend_version && master.backend_version !== 'unknown') ? master.backend_version : 'unknown';
-            }
+          const seenRuns = new Set();
+          const seenCombos = new Set();
+
+          for (let i = 0; i < clientRows.length; i++) {
+            const r = clientRows[i];
+
             if (r.event_stack === 'F') {
-              r.frontend_deployed_at = r.event_time || r.frontend_deployed_at || master.frontend_deployed_at;
-              if (!r.backend_deployed_at) {
-                r.backend_deployed_at = master.backend_deployed_at;
+              r.frontend_run_id = r.run_id;
+              r.frontend_deployed_at = r.event_time || r.frontend_deployed_at;
+              // Find matching B event at or before this event_time
+              let otherB = clientRows.slice(i).find(x => x.event_stack === 'B');
+              if (!otherB) otherB = clientRows.find(x => x.event_stack === 'B');
+              if (otherB) {
+                if (!r.backend_version || r.backend_version === 'unknown') {
+                  r.backend_version = otherB.backend_version;
+                }
+                r.backend_deployed_at = otherB.event_time || otherB.backend_deployed_at;
+                r.backend_run_id = otherB.run_id;
+              } else if (master) {
+                if (!r.backend_version || r.backend_version === 'unknown') {
+                  r.backend_version = master.backend_version;
+                }
+                if (!r.backend_deployed_at) r.backend_deployed_at = master.backend_deployed_at;
+                if (!r.backend_run_id) r.backend_run_id = master.backend_run_id;
               }
             } else if (r.event_stack === 'B') {
-              r.backend_deployed_at = r.event_time || r.backend_deployed_at || master.backend_deployed_at;
-              if (!r.frontend_deployed_at) {
-                r.frontend_deployed_at = master.frontend_deployed_at;
+              r.backend_run_id = r.run_id;
+              r.backend_deployed_at = r.event_time || r.backend_deployed_at;
+              // Find matching F event at or before this event_time
+              let otherF = clientRows.slice(i).find(x => x.event_stack === 'F');
+              if (!otherF) otherF = clientRows.find(x => x.event_stack === 'F');
+              if (otherF) {
+                if (!r.frontend_version || r.frontend_version === 'unknown') {
+                  r.frontend_version = otherF.frontend_version;
+                }
+                r.frontend_deployed_at = otherF.event_time || otherF.frontend_deployed_at;
+                r.frontend_run_id = otherF.run_id;
+              } else if (master) {
+                if (!r.frontend_version || r.frontend_version === 'unknown') {
+                  r.frontend_version = master.frontend_version;
+                }
+                if (!r.frontend_deployed_at) r.frontend_deployed_at = master.frontend_deployed_at;
+                if (!r.frontend_run_id) r.frontend_run_id = master.frontend_run_id;
               }
             }
-            if (!r.deployed_by || r.deployed_by === 'system') {
-              r.deployed_by = master.deployed_by || 'system';
+
+            // Deduplication keys:
+            // 1. Uniqueness by frontend_run_id + backend_run_id
+            const runKey = (r.frontend_run_id && r.backend_run_id) 
+              ? `${cName}|${r.frontend_run_id}|${r.backend_run_id}` 
+              : null;
+            // 2. Uniqueness by versions and deployment timestamps
+            const comboKey = `${cName}|${r.frontend_version || ''}|${r.backend_version || ''}|${r.frontend_deployed_at || ''}|${r.backend_deployed_at || ''}`;
+
+            if ((runKey && seenRuns.has(runKey)) || seenCombos.has(comboKey)) {
+              continue; // Duplicate record, skip!
             }
+            if (runKey) seenRuns.add(runKey);
+            seenCombos.add(comboKey);
+            dedupedHistory.push(r);
           }
         }
 
-        return deduped;
+        dedupedHistory.sort((a, b) => new Date(b.event_time || 0) - new Date(a.event_time || 0));
+        return dedupedHistory;
       }
     } catch (err) {
       // In case detail table not populated yet
@@ -495,21 +547,24 @@ async function getDeploymentHistory(clientFilter) {
 }
 
 /**
- * Update the is_deployable_to_client flag on a specific history record in SA_DEPLOYMENT_TRACKER_DTL
+ * Update the deployable flag on a specific history record in SA_DEPLOYMENT_TRACKER_DTL
+ * Supports stackType: 'frontend' (is_deployable_to_client) or 'backend' (is_backend_deployable)
  */
-async function updateHistoryDeployableFlag(dtlId, flagValue) {
+async function updateHistoryDeployableFlag(dtlId, flagValue, stackType = 'frontend') {
   const flagVal = parseInt(flagValue, 10) === 1 ? 1 : 0;
   const idNum = parseInt(dtlId, 10);
+  const isBackend = stackType === 'backend' || stackType === 'B';
+  const colName = isBackend ? 'is_backend_deployable' : 'is_deployable_to_client';
 
   const oracle = getOracleModule();
   if (oracle) {
     try {
-      const rec = await oracle.updateHistoryDeployableFlag(dtlId, flagVal);
+      const rec = await oracle.updateHistoryDeployableFlag(dtlId, flagVal, stackType);
       if (rec) {
         // Also update memory cache
         for (const h of mergedHistoryCache) {
           if (h.id === idNum || h.deployment_tracker_dtl_no === idNum) {
-            h.is_deployable_to_client = flagVal;
+            h[colName] = flagVal;
           }
         }
         return rec;
@@ -525,7 +580,7 @@ async function updateHistoryDeployableFlag(dtlId, flagValue) {
     try {
       const stmt = db.prepare(`
         UPDATE SA_DEPLOYMENT_TRACKER_DTL 
-        SET is_deployable_to_client = ?
+        SET ${colName} = ?
         WHERE deployment_tracker_dtl_no = ?
       `);
       stmt.run(flagVal, idNum);
@@ -535,7 +590,7 @@ async function updateHistoryDeployableFlag(dtlId, flagValue) {
         row.id = row.deployment_tracker_dtl_no;
         for (const h of mergedHistoryCache) {
           if (h.id === idNum || h.deployment_tracker_dtl_no === idNum) {
-            h.is_deployable_to_client = flagVal;
+            h[colName] = flagVal;
           }
         }
         return row;
@@ -548,7 +603,7 @@ async function updateHistoryDeployableFlag(dtlId, flagValue) {
   // In-memory fallback
   for (const h of mergedHistoryCache) {
     if (h.id === idNum || h.deployment_tracker_dtl_no === idNum) {
-      h.is_deployable_to_client = flagVal;
+      h[colName] = flagVal;
       return h;
     }
   }

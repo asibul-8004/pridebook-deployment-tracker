@@ -14,19 +14,32 @@ module.exports = async (req, res) => {
     if (typeof body === 'string') {
       try { body = JSON.parse(body); } catch (e) {}
     }
-    const { id, dtl_id, history_id, client_name, client, is_deployable_to_client, is_deployable } = body || {};
-    const rawFlag = is_deployable_to_client !== undefined ? is_deployable_to_client : is_deployable;
+    const { 
+      id, dtl_id, history_id, client_name, client, 
+      is_deployable_to_client, is_deployable, is_backend_deployable, 
+      stack_type, target_stack, stack 
+    } = body || {};
+
+    const targetStack = (stack_type || target_stack || stack || (is_backend_deployable !== undefined ? 'backend' : 'frontend')).toLowerCase();
+    const isBackend = targetStack === 'backend' || targetStack === 'b';
+
+    const rawFlag = isBackend
+      ? (is_backend_deployable !== undefined ? is_backend_deployable : (is_deployable !== undefined ? is_deployable : is_deployable_to_client))
+      : (is_deployable_to_client !== undefined ? is_deployable_to_client : (is_deployable !== undefined ? is_deployable : 0));
     const flagVal = parseInt(rawFlag, 10) === 1 ? 1 : 0;
 
     const historyTarget = dtl_id || history_id;
     if (historyTarget) {
-      // Toggle history release in child table SA_DEPLOYMENT_TRACKER_DTL
-      const record = await db.updateHistoryDeployableFlag(historyTarget, flagVal);
+      // Toggle history release in child table SA_DEPLOYMENT_TRACKER_DTL (frontend or backend)
+      const record = await db.updateHistoryDeployableFlag(historyTarget, flagVal, isBackend ? 'backend' : 'frontend');
       res.setHeader('Content-Type', 'application/json');
       return res.status(200).json({
         success: true,
         table: 'SA_DEPLOYMENT_TRACKER_DTL',
-        message: flagVal === 0 ? 'History release marked as Deployable (0)' : 'History release marked as Has Issue (1)',
+        stack: isBackend ? 'backend' : 'frontend',
+        message: flagVal === 0 
+          ? `History ${isBackend ? 'Backend' : 'Frontend'} marked as Deployable (0)` 
+          : `History ${isBackend ? 'Backend' : 'Frontend'} marked as Has Issue (1)`,
         record
       });
     }

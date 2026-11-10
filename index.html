@@ -74,17 +74,21 @@
       --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.04);
     }
 
-    * {
-      box-sizing: border-box;
+    html, body {
+      height: 100vh;
+      max-height: 100vh;
       margin: 0;
       padding: 0;
+      overflow: hidden;
       font-family: var(--font-family);
     }
 
     body {
       background-color: var(--bg-page);
       color: var(--text-primary);
-      min-height: 100vh;
+      height: 100vh;
+      max-height: 100vh;
+      overflow: hidden;
       display: flex;
       flex-direction: column;
       line-height: 1.5;
@@ -93,13 +97,14 @@
 
     /* Header */
     header {
+      flex-shrink: 0;
       position: sticky;
       top: 0;
       z-index: 100;
       background-color: var(--bg-header);
       backdrop-filter: blur(12px);
       border-bottom: 1px solid var(--border-color);
-      padding: 12px 24px;
+      padding: 10px 24px;
     }
 
     .header-container {
@@ -258,17 +263,20 @@
     /* Main Container */
     main {
       flex: 1;
+      min-height: 0;
       max-width: 1400px;
       width: 100%;
       margin: 0 auto;
-      padding: 24px;
+      padding: 16px 24px;
       display: flex;
       flex-direction: column;
-      gap: 24px;
+      gap: 16px;
+      overflow: hidden;
     }
 
     /* Tabs Bar */
     .tabs-wrapper {
+      flex-shrink: 0;
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -480,11 +488,18 @@
     .tab-pane {
       display: none;
       flex-direction: column;
-      gap: 20px;
+      gap: 16px;
     }
 
     .tab-pane.active {
       display: flex;
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    #tab3.active {
+      overflow-y: auto;
     }
 
     /* Status Badges */
@@ -816,9 +831,19 @@
       justify-content: center;
     }
 
+    /* Fixed UI sections */
+    .stats-grid,
+    .stage-hero-banner,
+    .toolbar-bar {
+      flex-shrink: 0;
+    }
+
     /* Table / List View (DEFAULT) */
     .table-responsive {
+      flex: 1;
+      min-height: 0;
       width: 100%;
+      overflow-y: auto;
       overflow-x: auto;
       background: var(--bg-card);
       border: 1px solid var(--border-card);
@@ -826,9 +851,35 @@
       box-shadow: var(--shadow-sm);
     }
 
+    .table-responsive::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    .table-responsive::-webkit-scrollbar-track {
+      background: var(--bg-card);
+      border-radius: 8px;
+    }
+    .table-responsive::-webkit-scrollbar-thumb {
+      background: var(--border-card);
+      border-radius: 8px;
+    }
+    .table-responsive::-webkit-scrollbar-thumb:hover {
+      background: var(--text-muted);
+    }
+
+    .client-grid {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+      gap: 20px;
+    }
+
     table {
       width: 100%;
-      border-collapse: collapse;
+      border-collapse: separate;
+      border-spacing: 0;
       text-align: left;
       font-size: 0.88rem;
     }
@@ -843,6 +894,10 @@
       letter-spacing: 0.04em;
       border-bottom: 1px solid var(--border-color);
       white-space: nowrap;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      box-shadow: 0 1px 0 var(--border-color);
     }
 
     td {
@@ -1378,7 +1433,7 @@
       </div>
 
       <!-- History Table -->
-      <div class="table-responsive">
+      <div class="table-responsive" id="historyTableWrapper">
         <table>
           <thead>
             <tr>
@@ -1389,7 +1444,8 @@
               <th>Status</th>
               <th>Frontend Deploy At</th>
               <th>Backend Deploy At</th>
-              <th id="thHistDeployable">Deployable to Client</th>
+              <th id="thHistFDeployable">Frontend Deployable</th>
+              <th id="thHistBDeployable">Backend Deployable</th>
             </tr>
           </thead>
           <tbody id="historyTableBody">
@@ -1704,34 +1760,46 @@
     }
 
     // Toggle deployable flag for a specific history release in child table SA_DEPLOYMENT_TRACKER_DTL
-    async function handleHistoryDeployableToggle(dtlId, client, targetFlag) {
+    // stackType: 'frontend' (is_deployable_to_client) or 'backend' (is_backend_deployable)
+    async function handleHistoryDeployableToggle(dtlId, client, targetFlag, stackType = 'frontend') {
       const idNum = parseInt(dtlId, 10);
+      const isBackend = stackType === 'backend' || stackType === 'B';
+      const colName = isBackend ? 'is_backend_deployable' : 'is_deployable_to_client';
+
       const histItem = mergedHistory.find(h => (h.id === idNum || h.deployment_tracker_dtl_no === idNum));
       if (histItem) {
-        histItem.is_deployable_to_client = targetFlag;
+        histItem[colName] = targetFlag;
         renderTab2History();
       }
 
       try {
+        const payload = {
+          dtl_id: idNum,
+          client_name: client,
+          stack_type: isBackend ? 'backend' : 'frontend'
+        };
+        if (isBackend) {
+          payload.is_backend_deployable = targetFlag;
+        } else {
+          payload.is_deployable_to_client = targetFlag;
+        }
+
         const res = await fetch('/api/deployments/toggle-deployable', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            dtl_id: idNum,
-            client_name: client,
-            is_deployable_to_client: targetFlag
-          })
+          body: JSON.stringify(payload)
         });
 
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         const flagName = targetFlag === 0 ? 'Deployable' : 'Has Issue';
-        showToast(`✅ ${client.toUpperCase()} History (#${idNum}): ${flagName}`);
+        const label = isBackend ? 'Backend Deployable' : 'Frontend Deployable';
+        showToast(`✅ ${client.toUpperCase()} History (#${idNum}) ${label}: ${flagName}`);
       } catch (err) {
         console.error('Failed to update history deployable flag in DB:', err);
         showToast(`Could not persist to DB: ${err.message}`, 'error');
         if (histItem) {
-          histItem.is_deployable_to_client = targetFlag === 0 ? 1 : 0;
+          histItem[colName] = targetFlag === 0 ? 1 : 0;
           renderTab2History();
         }
       }
@@ -2061,11 +2129,41 @@
       renderTab2History();
     }
 
+    // Strict uniqueness deduplication: by (frontend_run_id + backend_run_id) or point-in-time version combo
+    function deduplicateHistoryList(list) {
+      if (!list || !Array.isArray(list)) return [];
+      const seenRunKeys = new Set();
+      const seenComboKeys = new Set();
+      const result = [];
+
+      for (const item of list) {
+        const client = (item.client_name || '').toLowerCase();
+        const fRun = item.frontend_run_id || (item.event_stack === 'F' ? item.run_id : '');
+        const bRun = item.backend_run_id || (item.event_stack === 'B' ? item.run_id : '');
+        const fVer = item.frontend_version || '';
+        const bVer = item.backend_version || '';
+        const fAt = item.frontend_deployed_at || '';
+        const bAt = item.backend_deployed_at || '';
+
+        const runKey = (fRun && bRun) ? `${client}|${fRun}|${bRun}` : null;
+        const comboKey = `${client}|${fVer}|${bVer}|${fAt}|${bAt}`;
+
+        if ((runKey && seenRunKeys.has(runKey)) || seenComboKeys.has(comboKey)) {
+          continue; // Duplicate record, skip!
+        }
+        if (runKey) seenRunKeys.add(runKey);
+        seenComboKeys.add(comboKey);
+        result.push(item);
+      }
+      return result;
+    }
+
     function renderHistoryClientFilterButtons() {
       const container = document.getElementById('historyClientFilterGroup');
       if (!container) return;
 
-      const allList = (mergedHistory && mergedHistory.length > 0) ? mergedHistory : [];
+      const rawList = (mergedHistory && mergedHistory.length > 0) ? mergedHistory : [];
+      const allList = deduplicateHistoryList(rawList);
       const totalAll = allList.length;
       const clientStats = {};
 
@@ -2101,46 +2199,46 @@
     }
 
     function getAllHistoryEntries() {
+      let sourceList = [];
       if (mergedHistory && mergedHistory.length > 0) {
-        if (config.historySelectedClient !== 'all') {
-          return mergedHistory.filter(h => (h.client_name || '').toLowerCase() === config.historySelectedClient.toLowerCase());
-        }
-        return mergedHistory;
-      }
-
-      // Fallback if mergedHistory not loaded yet
-      const entries = [];
-      normalizedClients.forEach(c => {
-        const idLower = c.id.toLowerCase();
-        if (config.historySelectedClient !== 'all' && idLower !== config.historySelectedClient) return;
-        if (c.current && c.current.version && c.current.version !== 'unknown') {
-          entries.push({
-            client_name: c.id,
-            event_stack: 'F',
-            frontend_version: c.current.version,
-            backend_version: 'v2.10.1',
-            status: c.current.status,
-            event_time: c.current.last_deployed_at,
-            deployed_by: c.current.deployed_by,
-            run_id: c.current.run_id
-          });
-        }
-        if (Array.isArray(c.history)) {
-          c.history.forEach(h => {
-            entries.push({
+        sourceList = (config.historySelectedClient !== 'all')
+          ? mergedHistory.filter(h => (h.client_name || '').toLowerCase() === config.historySelectedClient.toLowerCase())
+          : mergedHistory;
+      } else {
+        // Fallback if mergedHistory not loaded yet
+        normalizedClients.forEach(c => {
+          const idLower = c.id.toLowerCase();
+          if (config.historySelectedClient !== 'all' && idLower !== config.historySelectedClient) return;
+          if (c.current && c.current.version && c.current.version !== 'unknown') {
+            sourceList.push({
               client_name: c.id,
               event_stack: 'F',
-              frontend_version: h.version,
-              backend_version: 'v2.10.0',
-              status: h.status,
-              event_time: h.last_deployed_at,
-              deployed_by: h.deployed_by,
-              run_id: h.run_id
+              frontend_version: c.current.version,
+              backend_version: 'v2.10.1',
+              status: c.current.status,
+              event_time: c.current.last_deployed_at,
+              deployed_by: c.current.deployed_by,
+              run_id: c.current.run_id
             });
-          });
-        }
-      });
-      return entries;
+          }
+          if (Array.isArray(c.history)) {
+            c.history.forEach(h => {
+              sourceList.push({
+                client_name: c.id,
+                event_stack: 'F',
+                frontend_version: h.version,
+                backend_version: 'v2.10.0',
+                status: h.status,
+                event_time: h.last_deployed_at,
+                deployed_by: h.deployed_by,
+                run_id: h.run_id
+              });
+            });
+          }
+        });
+      }
+
+      return deduplicateHistoryList(sourceList);
     }
 
     function renderTab2History() {
@@ -2158,11 +2256,11 @@
       const allEntries = getAllHistoryEntries();
       const isStageSelected = (config.historySelectedClient || '').toLowerCase() === 'stage';
 
-      // Show/hide Deployable column header based on whether Stage is selected
-      const thDeployable = document.getElementById('thHistDeployable');
-      if (thDeployable) {
-        thDeployable.style.display = isStageSelected ? '' : 'none';
-      }
+      // Show/hide Frontend & Backend Deployable column headers based on whether Stage is selected
+      const thFDeployable = document.getElementById('thHistFDeployable');
+      const thBDeployable = document.getElementById('thHistBDeployable');
+      if (thFDeployable) thFDeployable.style.display = isStageSelected ? '' : 'none';
+      if (thBDeployable) thBDeployable.style.display = isStageSelected ? '' : 'none';
 
       // Update hero banner based on selected client
       if (config.historySelectedClient === 'all') {
@@ -2191,13 +2289,16 @@
           (item.frontend_version || '').toLowerCase().includes(q) ||
           (item.backend_version || '').toLowerCase().includes(q) ||
           (item.deployed_by || '').toLowerCase().includes(q) ||
-          (item.run_id || '').toLowerCase().includes(q)
+          (item.run_id || '').toLowerCase().includes(q) ||
+          (item.frontend_run_id || '').toLowerCase().includes(q) ||
+          (item.backend_run_id || '').toLowerCase().includes(q)
         );
       }
 
       heroHistoryCount.innerText = filtered.length;
       if (badgeCount) {
-        badgeCount.innerText = (mergedHistory && mergedHistory.length > 0) ? mergedHistory.length : allEntries.length;
+        const dedupedAll = deduplicateHistoryList((mergedHistory && mergedHistory.length > 0) ? mergedHistory : []);
+        badgeCount.innerText = dedupedAll.length > 0 ? dedupedAll.length : allEntries.length;
       }
 
       if (filtered.length === 0) {
@@ -2207,7 +2308,7 @@
           emptyTitle.innerText = 'No Deployment History Recorded Yet';
           emptyText.innerText = 'Deployments from GitHub Actions will automatically stream here.';
         } else {
-          const colSpan = isStageSelected ? 8 : 7;
+          const colSpan = isStageSelected ? 9 : 7;
           historyTableBody.innerHTML = `<tr><td colspan="${colSpan}" style="text-align:center; padding: 32px; color:var(--text-muted)">No matching records found for active filters</td></tr>`;
         }
         return;
@@ -2219,10 +2320,13 @@
         const initials = getInitials(item.client_name);
         const isStage = (item.client_name || '').toLowerCase() === 'stage';
 
-        // Deployable status for this specific history record in SA_DEPLOYMENT_TRACKER_DTL
+        // Deployable status for Frontend and Backend in child table SA_DEPLOYMENT_TRACKER_DTL
         const dtlId = item.id || item.deployment_tracker_dtl_no || (idx + 1);
-        const isDeployable = (item.is_deployable_to_client === 0 || item.is_deployable_to_client === undefined || item.is_deployable_to_client === null);
-        const targetFlag = isDeployable ? 1 : 0;
+        const isFDeployable = (item.is_deployable_to_client === 0 || item.is_deployable_to_client === undefined || item.is_deployable_to_client === null);
+        const targetFFlag = isFDeployable ? 1 : 0;
+
+        const isBDeployable = (item.is_backend_deployable === 0 || item.is_backend_deployable === undefined || item.is_backend_deployable === null);
+        const targetBFlag = isBDeployable ? 1 : 0;
 
         const isFUnknown = !item.frontend_version || item.frontend_version === 'unknown';
         const isBUnknown = !item.backend_version || item.backend_version === 'unknown';
@@ -2287,17 +2391,31 @@
             </td>
 
             ${isStageSelected ? `
-            <!-- 8. Deployable to Client: Green by default (0), Red on change (1) -->
+            <!-- 8. Frontend Deployable: Green by default (0), Red on change (1) -->
             <td>
               <button 
-                class="toggle-switch-btn ${isDeployable ? 'state-green' : 'state-red'}" 
-                onclick="handleHistoryDeployableToggle(${dtlId}, '${escapeHtml(item.client_name)}', ${targetFlag})"
-                title="Click to toggle (Green: Deployable, Red: Has Issue)"
+                class="toggle-switch-btn ${isFDeployable ? 'state-green' : 'state-red'}" 
+                onclick="handleHistoryDeployableToggle(${dtlId}, '${escapeHtml(item.client_name)}', ${targetFFlag}, 'frontend')"
+                title="Toggle Frontend Deployable (Green: Deployable, Red: Has Issue)"
               >
                 <span class="toggle-slider">
                   <span class="toggle-knob"></span>
                 </span>
-                <span class="toggle-label">${isDeployable ? 'Deployable' : 'Has Issue'}</span>
+                <span class="toggle-label">${isFDeployable ? 'Deployable' : 'Has Issue'}</span>
+              </button>
+            </td>
+
+            <!-- 9. Backend Deployable: Green by default (0), Red on change (1) -->
+            <td>
+              <button 
+                class="toggle-switch-btn ${isBDeployable ? 'state-green' : 'state-red'}" 
+                onclick="handleHistoryDeployableToggle(${dtlId}, '${escapeHtml(item.client_name)}', ${targetBFlag}, 'backend')"
+                title="Toggle Backend Deployable (Green: Deployable, Red: Has Issue)"
+              >
+                <span class="toggle-slider">
+                  <span class="toggle-knob"></span>
+                </span>
+                <span class="toggle-label">${isBDeployable ? 'Deployable' : 'Has Issue'}</span>
               </button>
             </td>
             ` : ''}

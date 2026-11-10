@@ -1060,10 +1060,44 @@
       `;
 
       loadConfig();
+      fetchClientList();
       fetchTags();
       fetchRecentRuns(true);
       startRecentRunsPolling();
       onInputsChanged();
+    }
+
+    async function fetchClientList() {
+      try {
+        const res = await fetch('/api/deployments');
+        if (!res.ok) return;
+        const data = await res.json();
+        const records = Array.isArray(data) ? data : (data.records || data.deployments || []);
+        if (records.length > 0) {
+          const select = document.getElementById('targetClient');
+          if (!select) return;
+          const currentVal = (select.value || 'stage').toLowerCase();
+          const clientNames = Array.from(new Set(records.map(r => (r.client_name || '').toLowerCase()).filter(Boolean)));
+          
+          const sorted = clientNames.sort((a, b) => {
+            if (a === 'stage') return -1;
+            if (b === 'stage') return 1;
+            return a.localeCompare(b);
+          });
+
+          select.innerHTML = '';
+          sorted.forEach(c => {
+            const opt = document.createElement('option');
+            opt.value = c;
+            opt.textContent = c;
+            if (c === currentVal) opt.selected = true;
+            select.appendChild(opt);
+          });
+          onInputsChanged();
+        }
+      } catch (err) {
+        console.warn('Failed to load dynamic clients:', err);
+      }
     }
 
     async function loadConfig() {

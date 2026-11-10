@@ -1423,7 +1423,6 @@
     function buildDbDeploymentsFromRaw(json) {
       const records = [];
       let nextId = 1;
-      const standardClients = ['stage', 'shinshin', 'bengal', 'karupannya', 'ananta-uat', 'ananta-live'];
       const clientMap = new Map();
 
       if (json && typeof json === 'object') {
@@ -1434,20 +1433,19 @@
         }
       }
 
-      for (const client of standardClients) {
-        const curr = clientMap.get(client) || {};
+      for (const [client, curr] of clientMap.entries()) {
         records.push({
           id: nextId,
           deployment_tracker_no: nextId++,
           client_name: client,
-          frontend_version: curr.version || 'unknown',
-          backend_version: client === 'stage' ? 'v2.10.1' : (client === 'bengal' ? 'v2.10.0' : (client === 'shinshin' ? 'v2.9.0' : 'unknown')),
+          frontend_version: curr.version || curr.frontend_version || 'unknown',
+          backend_version: curr.backend_version || 'unknown',
           status: curr.status || 'pending_first_deploy',
           deployed_by: curr.deployed_by || 'system',
-          frontend_deployed_at: curr.last_deployed_at || null,
-          backend_deployed_at: null,
-          frontend_run_id: curr.run_id ? String(curr.run_id) : null,
-          backend_run_id: null,
+          frontend_deployed_at: curr.last_deployed_at || curr.frontend_deployed_at || null,
+          backend_deployed_at: curr.backend_deployed_at || null,
+          frontend_run_id: curr.run_id ? String(curr.run_id) : (curr.frontend_run_id ? String(curr.frontend_run_id) : null),
+          backend_run_id: curr.backend_run_id ? String(curr.backend_run_id) : null,
           is_deployable_to_client: curr.is_deployable_to_client !== undefined ? curr.is_deployable_to_client : 0
         });
       }
@@ -1985,12 +1983,12 @@
       });
 
       const uniqueClients = ['all'];
-      const standardClients = ['stage', 'shinshin', 'bengal', 'karupannya', 'ananta-uat', 'ananta-live'];
-      standardClients.forEach(c => {
-        if (!uniqueClients.includes(c)) uniqueClients.push(c);
-      });
       Object.keys(clientStats).forEach(c => {
         if (!uniqueClients.includes(c)) uniqueClients.push(c);
+      });
+      (allDbDeployments || []).forEach(d => {
+        const c = (d.client_name || '').toLowerCase();
+        if (c && !uniqueClients.includes(c)) uniqueClients.push(c);
       });
 
       let html = '';

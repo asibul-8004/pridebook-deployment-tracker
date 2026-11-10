@@ -112,80 +112,28 @@ function getSqliteDb() {
   }
 }
 
-const STANDARD_CLIENTS_BASELINE = [
-  {
-    client: 'stage',
-    f: 'v1.43.0',
-    b: 'v2.10.2',
-    status: 'success',
-    f_at: '2026-11-09T14:51:25Z',
-    b_at: '2026-11-09T11:53:42Z',
-    f_run: '42638076893',
-    b_run: '42611180632',
-    f_by: 'asibul-8004',
-    b_by: 'pridesys-java'
-  },
-  {
-    client: 'bengal',
-    f: 'v1.43.0',
-    b: 'v2.10.2',
-    status: 'success',
-    f_at: '2026-11-09T15:15:56Z',
-    b_at: '2026-11-09T15:21:08Z',
-    f_run: '42642554868',
-    b_run: '42642554525',
-    f_by: 'asibul-8004',
-    b_by: 'asibul-8004'
-  },
-  {
-    client: 'shinshin',
-    f: 'v1.43.0',
-    b: 'v2.10.2',
-    status: 'success',
-    f_at: '2026-11-09T15:09:55Z',
-    b_at: '2026-11-09T15:14:22Z',
-    f_run: '42641382645',
-    b_run: '42641382859',
-    f_by: 'asibul-8004',
-    b_by: 'asibul-8004'
-  },
-  {
-    client: 'karupannya',
-    f: 'v1.35.0',
-    b: 'v2.7.0',
-    status: 'success',
-    f_at: '2026-11-05T11:12:27Z',
-    b_at: '2026-11-05T11:11:04Z',
-    f_run: '42016106817',
-    b_run: '42015937928',
-    f_by: 'akib1689',
-    b_by: 'akib1689'
-  },
-  {
-    client: 'ananta-uat',
-    f: 'v1.34.0',
-    b: 'v2.7.0',
-    status: 'success',
-    f_at: '2026-11-05T07:28:55Z',
-    b_at: '2026-11-05T07:29:24Z',
-    f_run: '41987240359',
-    b_run: '41987235884',
-    f_by: 'akib1689',
-    b_by: 'akib1689'
-  },
-  {
-    client: 'ananta-live',
-    f: 'v1.32.0',
-    b: 'v2.6.0',
-    status: 'success',
-    f_at: '2026-11-05T08:28:43Z',
-    b_at: '2026-11-05T11:05:38Z',
-    f_run: '41994392713',
-    b_run: '42014390062',
-    f_by: 'akib1689',
-    b_by: 'akib1689'
+function loadRegisteredClientsFromDisk() {
+  try {
+    const candidates = [
+      path.join(process.cwd(), process.env.DEPLOYMENTS_FILE || 'deployments.json'),
+      path.join(__dirname, process.env.DEPLOYMENTS_FILE || 'deployments.json'),
+      path.join(process.cwd(), 'deployments.json'),
+      path.join(__dirname, 'deployments.json')
+    ];
+    for (const p of candidates) {
+      if (fs.existsSync(p)) {
+        const raw = fs.readFileSync(p, 'utf8');
+        const parsed = JSON.parse(raw);
+        return Object.keys(parsed)
+          .filter(k => !k.startsWith('_'))
+          .map(k => k.toLowerCase().trim());
+      }
+    }
+  } catch (err) {
+    console.warn('[loadRegisteredClientsFromDisk Warn]:', err.message);
   }
-];
+  return [];
+}
 
 function initSqliteSchema(db) {
   try {
@@ -271,38 +219,22 @@ function initSqliteSchema(db) {
       `);
     } catch (_) {}
 
-    // 3. ENSURE ALL 6 STANDARD CLIENTS EXIST IN MASTER WITH REAL BASELINE DATES
+    // 3. ENSURE ALL REGISTERED CLIENTS FROM deployments.json EXIST IN MASTER
     const nowIso = new Date().toISOString();
-    for (const c of STANDARD_CLIENTS_BASELINE) {
+    const regClients = loadRegisteredClientsFromDisk();
+    for (const client of regClients) {
       try {
         db.prepare(`
           INSERT INTO SA_DEPLOYMENT_TRACKER (
             client_name, frontend_version, backend_version, status, deployed_by,
-            frontend_deployed_at, backend_deployed_at, frontend_run_id, backend_run_id,
             is_deployable_to_client, synced_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
-          ON CONFLICT(client_name) DO UPDATE SET
-            frontend_version = excluded.frontend_version,
-            backend_version = excluded.backend_version,
-            status = excluded.status,
-            frontend_deployed_at = CASE 
-              WHEN SA_DEPLOYMENT_TRACKER.frontend_deployed_at IS NULL OR SA_DEPLOYMENT_TRACKER.frontend_deployed_at LIKE '2026-11-10T04:22%'
-              THEN excluded.frontend_deployed_at 
-              ELSE SA_DEPLOYMENT_TRACKER.frontend_deployed_at 
-            END,
-            backend_deployed_at = CASE 
-              WHEN SA_DEPLOYMENT_TRACKER.backend_deployed_at IS NULL OR SA_DEPLOYMENT_TRACKER.backend_deployed_at LIKE '2026-11-10T04:22%'
-              THEN excluded.backend_deployed_at 
-              ELSE SA_DEPLOYMENT_TRACKER.backend_deployed_at 
-            END,
-            frontend_run_id = COALESCE(SA_DEPLOYMENT_TRACKER.frontend_run_id, excluded.frontend_run_id),
-            backend_run_id = COALESCE(SA_DEPLOYMENT_TRACKER.backend_run_id, excluded.backend_run_id),
-            deployed_by = CASE WHEN SA_DEPLOYMENT_TRACKER.deployed_by = 'system' THEN excluded.deployed_by ELSE SA_DEPLOYMENT_TRACKER.deployed_by END
-        `).run(c.client, c.f, c.b, c.status, c.f_by, c.f_at, c.b_at, c.f_run, c.b_run, nowIso, nowIso);
+          ) VALUES (?, 'unknown', 'unknown', 'pending_first_deploy', 'system', 0, ?, ?)
+          ON CONFLICT(client_name) DO NOTHING
+        `).run(client, nowIso, nowIso);
       } catch (_) {}
     }
 
-    // 4. HEAL UNKNOWN VERSIONS IN DETAIL TABLE
+    // 4. HEAL UNKNOWN VERSIONS IN DETAIL TABLE USING MASTER
     try {
       db.exec(`
         UPDATE SA_DEPLOYMENT_TRACKER_DTL 
@@ -325,32 +257,6 @@ function initSqliteSchema(db) {
         WHERE backend_version = 'unknown' 
           AND client_name IN (SELECT client_name FROM SA_DEPLOYMENT_TRACKER WHERE backend_version != 'unknown');
       `);
-    } catch (_) {}
-
-    // 5. SEED INITIAL HISTORY IF DETAIL TABLE IS EMPTY WITH REAL TIMESTAMPS
-    try {
-      const dtlCount = db.prepare('SELECT count(*) as cnt FROM SA_DEPLOYMENT_TRACKER_DTL WHERE run_id NOT LIKE "init_%"').get();
-      if (!dtlCount || dtlCount.cnt === 0) {
-        for (const c of STANDARD_CLIENTS_BASELINE) {
-          const mRow = db.prepare('SELECT deployment_tracker_no FROM SA_DEPLOYMENT_TRACKER WHERE client_name = ?').get(c.client);
-          const tNo = mRow ? mRow.deployment_tracker_no : 1;
-          db.prepare(`
-            INSERT OR IGNORE INTO SA_DEPLOYMENT_TRACKER_DTL (
-              deployment_tracker_no, client_name, event_stack, frontend_version,
-              backend_version, status, deployed_by, frontend_deployed_at,
-              backend_deployed_at, run_id, event_time, is_deployable_to_client, created_at
-            ) VALUES (?, ?, 'F', ?, ?, 'success', ?, ?, null, ?, ?, 0, ?)
-          `).run(tNo, c.client, c.f, c.b, c.f_by, c.f_at, c.f_run, c.f_at, c.f_at);
-
-          db.prepare(`
-            INSERT OR IGNORE INTO SA_DEPLOYMENT_TRACKER_DTL (
-              deployment_tracker_no, client_name, event_stack, frontend_version,
-              backend_version, status, deployed_by, frontend_deployed_at,
-              backend_deployed_at, run_id, event_time, is_deployable_to_client, created_at
-            ) VALUES (?, ?, 'B', ?, ?, 'success', ?, null, ?, ?, ?, 0, ?)
-          `).run(tNo, c.client, c.f, c.b, c.b_by, c.b_at, c.b_run, c.b_at, c.b_at);
-        }
-      }
     } catch (_) {}
   } catch (err) {
     console.warn('[SQLite Schema Warn]:', err.message);
@@ -416,10 +322,11 @@ async function getAllDeployments(filters = {}) {
       const stmt = db.prepare(sql);
       let rows = stmt.all(...params);
 
-      // Guarantee all standard 6 clients exist in SQLite with real timestamps
+      // Ensure all registered clients from deployments.json exist in results
       if (!filters.client_name) {
         const existingSet = new Set((rows || []).map(r => (r.client_name || '').toLowerCase()));
-        const missing = STANDARD_CLIENTS_BASELINE.filter(b => !existingSet.has(b.client.toLowerCase()));
+        const regClients = loadRegisteredClientsFromDisk();
+        const missing = regClients.filter(c => !existingSet.has(c));
         if (missing.length > 0) {
           const nowIso = new Date().toISOString();
           for (const m of missing) {
@@ -427,43 +334,13 @@ async function getAllDeployments(filters = {}) {
               db.prepare(`
                 INSERT INTO SA_DEPLOYMENT_TRACKER (
                   client_name, frontend_version, backend_version, status, deployed_by,
-                  frontend_deployed_at, backend_deployed_at, frontend_run_id, backend_run_id,
                   is_deployable_to_client, synced_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
-                ON CONFLICT(client_name) DO UPDATE SET
-                  frontend_version = excluded.frontend_version,
-                  backend_version = excluded.backend_version,
-                  status = excluded.status,
-                  frontend_deployed_at = excluded.frontend_deployed_at,
-                  backend_deployed_at = excluded.backend_deployed_at,
-                  frontend_run_id = excluded.frontend_run_id,
-                  backend_run_id = excluded.backend_run_id
-              `).run(m.client, m.f, m.b, m.status, m.f_by, m.f_at, m.b_at, m.f_run, m.b_run, nowIso, nowIso);
+                ) VALUES (?, 'unknown', 'unknown', 'pending_first_deploy', 'system', 0, ?, ?)
+                ON CONFLICT(client_name) DO NOTHING
+              `).run(m, nowIso, nowIso);
             } catch (_) {}
           }
           rows = stmt.all(...params);
-        }
-      }
-
-      // Ensure no rows have null or corrupted 'just now' deploy dates
-      for (const r of rows) {
-        const base = STANDARD_CLIENTS_BASELINE.find(b => b.client.toLowerCase() === (r.client_name || '').toLowerCase());
-        if (base) {
-          if (!r.frontend_deployed_at || r.frontend_deployed_at.startsWith('2026-11-10T04:22')) {
-            r.frontend_deployed_at = base.f_at;
-          }
-          if (!r.backend_deployed_at || r.backend_deployed_at.startsWith('2026-11-10T04:22')) {
-            r.backend_deployed_at = base.b_at;
-          }
-          if (!r.frontend_run_id || r.frontend_run_id.startsWith('init_')) {
-            r.frontend_run_id = base.f_run;
-          }
-          if (!r.backend_run_id || r.backend_run_id.startsWith('init_')) {
-            r.backend_run_id = base.b_run;
-          }
-          if (!r.deployed_by || r.deployed_by === 'system') {
-            r.deployed_by = base.f_by;
-          }
         }
       }
 
@@ -473,24 +350,27 @@ async function getAllDeployments(filters = {}) {
     }
   }
 
-  // In-memory fallback: guarantee all standard 6 clients exist
+  // In-memory fallback: guarantee registered clients exist
   if (inMemoryStore.size === 0) {
-    for (const b of STANDARD_CLIENTS_BASELINE) {
-      inMemoryStore.set(b.client.toLowerCase(), {
+    const regClients = loadRegisteredClientsFromDisk();
+    const nowIso = new Date().toISOString();
+    for (const c of regClients) {
+      inMemoryStore.set(c, {
         deployment_tracker_no: inMemoryStore.size + 1,
         id: inMemoryStore.size + 1,
-        client_name: b.client,
-        frontend_version: b.f,
-        backend_version: b.b,
-        status: b.status,
-        deployed_by: b.f_by,
-        frontend_deployed_at: b.f_at,
-        backend_deployed_at: b.b_at,
-        frontend_run_id: b.f_run,
-        backend_run_id: b.b_run,
+        client_name: c,
+        frontend_version: 'unknown',
+        backend_version: 'unknown',
+        status: 'pending_first_deploy',
+        deployed_by: 'system',
+        frontend_deployed_at: null,
+        backend_deployed_at: null,
+        frontend_run_id: null,
+        backend_run_id: null,
         is_deployable_to_client: 0,
-        synced_at: b.f_at,
-        updated_at: b.f_at
+        issue_notes: '',
+        synced_at: nowIso,
+        updated_at: nowIso
       });
     }
   }
@@ -564,48 +444,38 @@ async function getDeploymentHistory(clientFilter) {
           }
         }
 
-        // 2. Heal unknown versions and timestamps using client master / baseline data
-        const baselineMap = new Map();
-        for (const b of STANDARD_CLIENTS_BASELINE) {
-          baselineMap.set(b.client.toLowerCase(), { f: b.f, b: b.b, f_at: b.f_at, b_at: b.b_at, by: b.f_by });
-        }
-
+        // 2. Heal unknown versions and timestamps using client master records
+        const masterMap = new Map();
         try {
-          const masters = db.prepare('SELECT LOWER(client_name) AS name, frontend_version, backend_version, frontend_deployed_at, backend_deployed_at FROM SA_DEPLOYMENT_TRACKER').all();
+          const masters = db.prepare('SELECT LOWER(client_name) AS name, frontend_version, backend_version, frontend_deployed_at, backend_deployed_at, deployed_by FROM SA_DEPLOYMENT_TRACKER').all();
           for (const m of masters) {
-            const cur = baselineMap.get(m.name) || {};
-            if (m.frontend_version && m.frontend_version !== 'unknown') cur.f = m.frontend_version;
-            if (m.backend_version && m.backend_version !== 'unknown') cur.b = m.backend_version;
-            if (m.frontend_deployed_at && !m.frontend_deployed_at.startsWith('2026-11-10T04:22')) cur.f_at = m.frontend_deployed_at;
-            if (m.backend_deployed_at && !m.backend_deployed_at.startsWith('2026-11-10T04:22')) cur.b_at = m.backend_deployed_at;
-            baselineMap.set(m.name, cur);
+            masterMap.set(m.name, m);
           }
         } catch (_) {}
 
         for (const r of deduped) {
           const cName = (r.client_name || '').toLowerCase();
-          const base = baselineMap.get(cName);
-          if (base) {
+          const master = masterMap.get(cName);
+          if (master) {
             if (!r.frontend_version || r.frontend_version === 'unknown') {
-              r.frontend_version = base.f || 'unknown';
+              r.frontend_version = (master.frontend_version && master.frontend_version !== 'unknown') ? master.frontend_version : 'unknown';
             }
             if (!r.backend_version || r.backend_version === 'unknown') {
-              r.backend_version = base.b || 'unknown';
+              r.backend_version = (master.backend_version && master.backend_version !== 'unknown') ? master.backend_version : 'unknown';
             }
             if (r.event_stack === 'F') {
-              if (!r.frontend_deployed_at || r.frontend_deployed_at.startsWith('2026-11-10T04:22')) {
-                r.frontend_deployed_at = r.event_time || base.f_at;
-              }
-              if (!r.backend_deployed_at || r.backend_deployed_at.startsWith('2026-11-10T04:22')) {
-                r.backend_deployed_at = base.b_at;
+              r.frontend_deployed_at = r.event_time || r.frontend_deployed_at || master.frontend_deployed_at;
+              if (!r.backend_deployed_at) {
+                r.backend_deployed_at = master.backend_deployed_at;
               }
             } else if (r.event_stack === 'B') {
-              if (!r.backend_deployed_at || r.backend_deployed_at.startsWith('2026-11-10T04:22')) {
-                r.backend_deployed_at = r.event_time || base.b_at;
+              r.backend_deployed_at = r.event_time || r.backend_deployed_at || master.backend_deployed_at;
+              if (!r.frontend_deployed_at) {
+                r.frontend_deployed_at = master.frontend_deployed_at;
               }
-              if (!r.frontend_deployed_at || r.frontend_deployed_at.startsWith('2026-11-10T04:22')) {
-                r.frontend_deployed_at = base.f_at;
-              }
+            }
+            if (!r.deployed_by || r.deployed_by === 'system') {
+              r.deployed_by = master.deployed_by || 'system';
             }
           }
         }
@@ -909,9 +779,23 @@ async function updateHistoryStatus(runId, status) {
  * Refresh master table client versions (SA_DEPLOYMENT_TRACKER) from latest detail events (SA_DEPLOYMENT_TRACKER_DTL)
  */
 async function refreshMasterClientsFromDtl(clientList) {
-  const targets = (clientList && clientList.length > 0)
-    ? clientList
-    : ['stage', 'shinshin', 'karupannya', 'bengal', 'ananta-uat', 'ananta-live'];
+  let targets = clientList;
+  if (!targets || targets.length === 0) {
+    const curDb = getSqliteDb();
+    if (curDb) {
+      try {
+        const rows = curDb.prepare(`
+          SELECT DISTINCT client_name FROM SA_DEPLOYMENT_TRACKER
+          UNION
+          SELECT DISTINCT client_name FROM SA_DEPLOYMENT_TRACKER_DTL
+        `).all();
+        targets = rows.map(r => r.client_name).filter(Boolean);
+      } catch (_) {}
+    }
+    if (!targets || targets.length === 0) {
+      targets = loadRegisteredClientsFromDisk();
+    }
+  }
 
   // 1. Oracle refresh
   const oracle = getOracleModule();
@@ -930,7 +814,6 @@ async function refreshMasterClientsFromDtl(clientList) {
     try {
       for (const rawClient of targets) {
         const client = rawClient.toLowerCase().trim();
-        const base = STANDARD_CLIENTS_BASELINE.find(b => b.client.toLowerCase() === client) || {};
         const existingMaster = db.prepare('SELECT * FROM SA_DEPLOYMENT_TRACKER WHERE LOWER(client_name) = ?').get(client);
 
         const latestF = db.prepare(`
@@ -939,7 +822,7 @@ async function refreshMasterClientsFromDtl(clientList) {
           WHERE LOWER(client_name) = ? AND event_stack = 'F' 
             AND run_id NOT LIKE 'init_%'
             AND event_time NOT LIKE '2026-11-10T04:22%'
-          ORDER BY event_time DESC LIMIT 1
+          ORDER BY event_time DESC, deployment_tracker_dtl_no DESC LIMIT 1
         `).get(client);
 
         const latestB = db.prepare(`
@@ -948,46 +831,47 @@ async function refreshMasterClientsFromDtl(clientList) {
           WHERE LOWER(client_name) = ? AND event_stack = 'B' 
             AND run_id NOT LIKE 'init_%'
             AND event_time NOT LIKE '2026-11-10T04:22%'
-          ORDER BY event_time DESC LIMIT 1
+          ORDER BY event_time DESC, deployment_tracker_dtl_no DESC LIMIT 1
         `).get(client);
 
         const fVer = (latestF && latestF.frontend_version && latestF.frontend_version !== 'unknown')
           ? latestF.frontend_version
-          : (existingMaster?.frontend_version && existingMaster.frontend_version !== 'unknown' ? existingMaster.frontend_version : (base.f || 'unknown'));
+          : (existingMaster?.frontend_version || 'unknown');
 
         const bVer = (latestB && latestB.backend_version && latestB.backend_version !== 'unknown')
           ? latestB.backend_version
-          : (existingMaster?.backend_version && existingMaster.backend_version !== 'unknown' ? existingMaster.backend_version : (base.b || 'unknown'));
+          : (existingMaster?.backend_version || 'unknown');
 
         const fAt = (latestF && latestF.event_time)
           ? latestF.event_time
-          : ((existingMaster?.frontend_deployed_at && !existingMaster.frontend_deployed_at.startsWith('2026-11-10T04:22'))
-            ? existingMaster.frontend_deployed_at
-            : (base.f_at || null));
+          : (existingMaster?.frontend_deployed_at || null);
 
         const bAt = (latestB && latestB.event_time)
           ? latestB.event_time
-          : ((existingMaster?.backend_deployed_at && !existingMaster.backend_deployed_at.startsWith('2026-11-10T04:22'))
-            ? existingMaster.backend_deployed_at
-            : (base.b_at || null));
+          : (existingMaster?.backend_deployed_at || null);
 
         const fRun = (latestF && latestF.run_id)
           ? latestF.run_id
-          : (existingMaster?.frontend_run_id || base.f_run || null);
+          : (existingMaster?.frontend_run_id || null);
 
         const bRun = (latestB && latestB.run_id)
           ? latestB.run_id
-          : (existingMaster?.backend_run_id || base.b_run || null);
+          : (existingMaster?.backend_run_id || null);
 
         const actor = (latestF?.deployed_by && latestF.deployed_by !== 'system')
           ? latestF.deployed_by
           : ((latestB?.deployed_by && latestB.deployed_by !== 'system')
             ? latestB.deployed_by
-            : (existingMaster?.deployed_by && existingMaster.deployed_by !== 'system' ? existingMaster.deployed_by : (base.f_by || 'system')));
+            : (existingMaster?.deployed_by || 'system'));
 
-        const status = ((latestF && latestF.status === 'success') || (latestB && latestB.status === 'success') || base.status === 'success')
-          ? 'success'
-          : (latestF?.status || latestB?.status || existingMaster?.status || 'success');
+        let status = 'pending_first_deploy';
+        if ((latestF && latestF.status === 'success') || (latestB && latestB.status === 'success') || existingMaster?.status === 'success') {
+          status = 'success';
+        } else if (latestF?.status || latestB?.status) {
+          status = latestF?.status || latestB?.status;
+        } else if (existingMaster?.status) {
+          status = existingMaster.status;
+        }
 
         db.prepare(`
           INSERT INTO SA_DEPLOYMENT_TRACKER (
@@ -1077,9 +961,8 @@ async function fetchIncrementalWorkflowRuns({ repo, stack, token, knownRunsMap }
         else if (run.status === 'in_progress') status = 'in_progress';
         else if (run.status === 'queued') status = 'queued';
 
-        const base = STANDARD_CLIENTS_BASELINE.find(b => b.client.toLowerCase() === client) || {};
-        let fVer = stack === 'F' ? match[1] : (base.f || 'unknown');
-        let bVer = stack === 'B' ? match[1] : (base.b || 'unknown');
+        let fVer = stack === 'F' ? match[1] : 'unknown';
+        let bVer = stack === 'B' ? match[1] : 'unknown';
 
         const curDb = getSqliteDb();
         if (curDb) {
@@ -1114,49 +997,118 @@ async function fetchIncrementalWorkflowRuns({ repo, stack, token, knownRunsMap }
 }
 
 /**
+ * Fetch all historical workflow runs and parse jobs during initial database bootstrap
+ */
+async function fetchAllHistoricalWorkflowRuns({ repo, stack, token }) {
+  const headers = {
+    'User-Agent': 'Pridebook-DB-Bootstrap',
+    'Accept': 'application/vnd.github.v3+json'
+  };
+  if (token) headers['Authorization'] = `token ${token.trim()}`;
+
+  const runsUrl = `https://api.github.com/repos/${repo}/actions/workflows/release-deploy.yml/runs?per_page=100`;
+  const res = await fetch(runsUrl, { headers });
+  if (!res.ok) return [];
+
+  const data = await res.json();
+  const runs = data.workflow_runs || [];
+  const events = [];
+
+  // Inspect jobs in batches of 5
+  for (let i = 0; i < runs.length; i += 5) {
+    const batch = runs.slice(i, i + 5);
+    await Promise.all(batch.map(async run => {
+      let jobs = workflowJobsCache.get(run.id);
+      if (!jobs) {
+        try {
+          const jobsRes = await fetch(run.jobs_url, { headers });
+          if (jobsRes.ok) {
+            const jobsData = await jobsRes.json();
+            jobs = jobsData.jobs || [];
+            if (run.status === 'completed') {
+              workflowJobsCache.set(run.id, jobs);
+            }
+          }
+        } catch (_) {}
+      }
+
+      for (const job of (jobs || [])) {
+        const match = job.name.match(/(?:Deploy|Validate release)\s+(v[0-9.]+)\s+(?:to|for)\s+([a-zA-Z0-9_-]+)/i);
+        if (match && job.name.startsWith('Deploy')) {
+          const client = match[2].toLowerCase().trim();
+          let status = 'pending';
+          if (run.conclusion === 'success' || job.conclusion === 'success') status = 'success';
+          else if (run.conclusion === 'cancelled' || job.conclusion === 'cancelled') status = 'cancelled';
+          else if (run.conclusion === 'failure' || job.conclusion === 'failure') status = 'failed';
+          else if (run.status === 'in_progress') status = 'in_progress';
+          else if (run.status === 'queued') status = 'queued';
+
+          events.push({
+            client_name: client,
+            event_stack: stack,
+            version: match[1],
+            status,
+            deployed_by: run.actor?.login || 'system',
+            event_time: job.completed_at || run.created_at,
+            run_id: String(run.id)
+          });
+        }
+      }
+    }));
+  }
+
+  return events;
+}
+
+/**
  * Bootstrap initial database if detail table is completely empty
  */
 async function bootstrapInitialDatabase(token) {
   const repoF = process.env.GITHUB_FRONTEND_REPO || process.env.GITHUB_REPO || 'pride-erp-local/pride-erp-frontend';
   const repoB = process.env.GITHUB_BACKEND_REPO || (process.env.GITHUB_REPO ? process.env.GITHUB_REPO.replace(/-frontend$/, '-backend') : '') || 'pride-erp-local/pride-erp-backend';
-  const emptyMap = new Map();
 
   const [fEvents, bEvents] = await Promise.all([
-    fetchIncrementalWorkflowRuns({ repo: repoF, stack: 'F', token, knownRunsMap: emptyMap }),
-    fetchIncrementalWorkflowRuns({ repo: repoB, stack: 'B', token, knownRunsMap: emptyMap })
+    fetchAllHistoricalWorkflowRuns({ repo: repoF, stack: 'F', token }),
+    fetchAllHistoricalWorkflowRuns({ repo: repoB, stack: 'B', token })
   ]);
 
   const allEvents = [...fEvents, ...bEvents].sort((a, b) => new Date(a.event_time) - new Date(b.event_time));
+  console.log(`[DB Bootstrap] Discovered ${allEvents.length} deployment events across GitHub Actions history.`);
+
   if (allEvents.length > 0) {
     const db = getSqliteDb();
     if (db) {
+      const nowIso = new Date().toISOString();
       for (const ev of allEvents) {
         let trackerNo = await upsertDeployment({
           client_name: ev.client_name,
-          frontend_version: ev.event_stack === 'F' ? ev.frontend_version : 'unknown',
-          backend_version: ev.event_stack === 'B' ? ev.backend_version : 'unknown',
+          frontend_version: ev.event_stack === 'F' ? ev.version : 'unknown',
+          backend_version: ev.event_stack === 'B' ? ev.version : 'unknown',
           status: ev.status
         });
-        db.prepare(`
-          INSERT INTO SA_DEPLOYMENT_TRACKER_DTL (
-            deployment_tracker_no, client_name, event_stack, frontend_version,
-            backend_version, status, deployed_by, frontend_deployed_at,
-            backend_deployed_at, run_id, event_time, is_deployable_to_client, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
-        `).run(
-          trackerNo,
-          ev.client_name,
-          ev.event_stack,
-          ev.frontend_version,
-          ev.backend_version,
-          ev.status,
-          ev.deployed_by,
-          ev.frontend_deployed_at,
-          ev.backend_deployed_at,
-          ev.run_id,
-          ev.event_time,
-          new Date().toISOString()
-        );
+        try {
+          db.prepare(`
+            INSERT INTO SA_DEPLOYMENT_TRACKER_DTL (
+              deployment_tracker_no, client_name, event_stack, frontend_version,
+              backend_version, status, deployed_by, frontend_deployed_at,
+              backend_deployed_at, run_id, event_time, is_deployable_to_client, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+            ON CONFLICT DO NOTHING
+          `).run(
+            trackerNo,
+            ev.client_name,
+            ev.event_stack,
+            ev.event_stack === 'F' ? ev.version : 'unknown',
+            ev.event_stack === 'B' ? ev.version : 'unknown',
+            ev.status,
+            ev.deployed_by,
+            ev.event_stack === 'F' ? ev.event_time : null,
+            ev.event_stack === 'B' ? ev.event_time : null,
+            ev.run_id,
+            ev.event_time,
+            nowIso
+          );
+        } catch (_) {}
       }
     }
 

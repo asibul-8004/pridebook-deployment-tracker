@@ -234,9 +234,8 @@ async function triggerReleaseDeploy({
   }
 
   const targetClient = (client || '').toLowerCase().trim();
-  const allowedClients = ['stage', 'shinshin', 'karupannya', 'bengal', 'arrival', 'ananta-uat', 'ananta-live'];
-  if (!allowedClients.includes(targetClient)) {
-    throw new Error(`Invalid client '${targetClient}'. Allowed: ${allowedClients.join(', ')}`);
+  if (!targetClient || !/^[a-zA-Z0-9_-]+$/.test(targetClient)) {
+    throw new Error(`Invalid client name '${client}'. Client name must contain only letters, numbers, hyphens, and underscores.`);
   }
 
   const fTag = (frontend_tag || '').trim();
